@@ -1313,7 +1313,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               if (!fromPlayer || !toPlayer) return null;
               
               const fromLaneIndex = activePlayers.indexOf(fromPlayer);
-              const toLaneIndex = activePlayers.indexOf(toPlayer);
+              const _toLaneIndex = activePlayers.indexOf(toPlayer);
               
               // Current step box position
               const currentStepX = leftMargin + (step.column + 0.5) * columnWidth + 80; // Right edge of current step
@@ -1395,7 +1395,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
             })}
 
             {/* Draw decision lines - each option goes to its target */}
-            {processSteps.filter(s => s.isDecision).map((step, decisionIndex) => {
+            {processSteps.filter(s => s.isDecision).map((step) => {
               const box = step.decisionBox;
               if (!box) return null;
               
@@ -1412,7 +1412,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               const decisionRightX = boxX + 42; // Right corner
               const decisionRightY = boxY;
               
-              return box.options.map((option, optIdx) => {
+              return box.options.map((option: any, optIdx: number) => {
                 const toPlayer = activePlayers.find(p => p.id === option.toPlayerId);
                 if (!toPlayer) return null;
                 
@@ -1597,19 +1597,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   }}
                   onClick={() => {
                     if (step.cards.length > 0) {
-                      const processStep = {
-                        id: step.id,
-                        playerId: step.playerId,
-                        playerName: player.name,
-                        role: player.role,
-                        text: lastCard.text,
-                        medium: lastCard.medium,
-                        duration: lastCard.duration,
-                        description: lastCard.description,
-                        communicationObjectIds: lastCard.communicationObjectIds || [],
-                        cards: step.cards
-                      };
-                      setInspectedProcessStep(processStep);
+                      setInspectedProcessStep(step.id);
                     }
                   }}
                 >
