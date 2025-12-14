@@ -1313,7 +1313,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
               if (!fromPlayer || !toPlayer) return null;
               
               const fromLaneIndex = activePlayers.indexOf(fromPlayer);
-              const _toLaneIndex = activePlayers.indexOf(toPlayer);
               
               // Current step box position
               const currentStepX = leftMargin + (step.column + 0.5) * columnWidth + 80; // Right edge of current step
