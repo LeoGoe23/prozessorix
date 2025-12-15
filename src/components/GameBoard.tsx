@@ -1151,7 +1151,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
     // Ensure currentCardIndex is within bounds
     const safeIndex = Math.max(0, Math.min(currentCardIndex, allItems.length - 1));
-    const currentItem = allItems[safeIndex];
 
     return (
       <div className="absolute inset-0 flex items-center justify-center p-8 overflow-hidden">
