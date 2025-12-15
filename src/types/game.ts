@@ -96,7 +96,7 @@ export interface ProcessConnector {
 
 export type ProcessObject = ProcessStep | SystemTool | CommunicationMethod | ProcessConnector;
 
-export type GameBoardView = 'player-centric' | 'process-centric' | 'swimlane';
+export type GameBoardView = 'player-centric' | 'swimlane' | 'eingabe';
 
 export interface GameState {
   players: Player[];

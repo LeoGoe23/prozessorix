@@ -1,6 +1,6 @@
 import React from 'react';
 import { Player, ProcessCard, ProcessObject, PLAYER_COLORS, DEFAULT_ROLES, PLAYER_ICONS, GameBoardView, DECISION_ICONS } from '../types/game';
-import { Users, Plus, Trash2, ChevronDown, UserPlus, GitBranch, X, Share2, User, Settings, LayoutGrid, Network } from 'lucide-react';
+import { Users, Plus, Trash2, ChevronDown, UserPlus, GitBranch, X, Share2, User, Settings, LayoutGrid } from 'lucide-react';
 import ShareGameModal from './ShareGameModal';
 import IconPicker from './IconPicker';
 import ProcessObjectToolbox from './ProcessObjectToolbox';
@@ -47,6 +47,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [showPlayerModal, setShowPlayerModal] = React.useState(false);
   const [showProcessModal, setShowProcessModal] = React.useState(false);
   const [showShareModal, setShowShareModal] = React.useState(false);
+  const [showResultsModal, setShowResultsModal] = React.useState(false);
   
   // Player form
   const [currentName, setCurrentName] = React.useState('');
@@ -135,8 +136,11 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [connectionMenuPosition, setConnectionMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [connectionMenuTarget, setConnectionMenuTarget] = React.useState<string | null>(null);
   
-  // View mode state (player-centric vs process-centric)
+  // View mode state
   const [viewMode, setViewMode] = React.useState<GameBoardView>('player-centric');
+  
+  // Eingabe view state - for card navigation
+  const [currentCardIndex, setCurrentCardIndex] = React.useState(0);
   
   // State for decision creation
   const [isDecisionMode, setIsDecisionMode] = React.useState(false);
@@ -158,6 +162,47 @@ const GameBoard: React.FC<GameBoardProps> = ({
     position: { x: number; y: number };
     type: 'binary' | 'multiple';
   }>>([]);
+
+  // Keyboard navigation for Eingabe view
+  React.useEffect(() => {
+    if (viewMode !== 'eingabe') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const connections = getConnections();
+      const allCards = connections.flatMap(conn => conn.cards).sort((a, b) => a.timestamp - b.timestamp);
+      
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setCurrentCardIndex(prev => Math.max(0, prev - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setCurrentCardIndex(prev => Math.min(allCards.length - 1, prev + 1));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewMode, currentCardIndex, cards]);
+
+  // Helper function to get the last recipient (for auto-selecting next sender)
+  const getLastRecipient = () => {
+    if (cards.length === 0) return null;
+    const sortedCards = [...cards].sort((a, b) => a.timestamp - b.timestamp);
+    return sortedCards[sortedCards.length - 1].toPlayerId;
+  };
+
+  // Function to open process modal with auto-selected sender
+  const openProcessModalWithAutoSender = () => {
+    const lastRecipient = getLastRecipient();
+    if (lastRecipient) {
+      setSelectedFromPlayer(lastRecipient);
+      setSelectedToPlayer(null);
+    } else {
+      setSelectedFromPlayer(null);
+      setSelectedToPlayer(null);
+    }
+    setShowProcessModal(true);
+  };
 
   const handleAddPlayer = () => {
     if (currentName.trim() && currentRole.trim()) {
@@ -605,7 +650,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
   
   const handleAddDecision = () => {
-    if (decisionQuestion.trim() && decisionStarter && selectedProcessObject) {
+    if (decisionQuestion.trim() && decisionStarter && decisionOptions.every(opt => opt.label.trim() && opt.toPlayerId)) {
       // Berechne Position der Entscheidungsbox (zwischen Starter und den Zielspielern)
       const starterPlayer = players.find(p => p.id === decisionStarter);
       if (!starterPlayer) return;
@@ -662,7 +707,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
         { label: 'Nein', description: '' }
       ]);
       setDecisionStarter(null);
-      setSelectedProcessObject(null);
       setIsDecisionMode(false);
       setShowDecisionModal(false);
     }
@@ -1069,6 +1113,403 @@ const GameBoard: React.FC<GameBoardProps> = ({
     });
     
     return connections;
+  };
+
+  // Render Eingabe view - card-by-card navigation through process steps
+  const renderEingabeView = () => {
+    const connections = getConnections();
+    
+    // Flatten all cards and decision boxes in chronological order
+    const processCards = connections.flatMap(conn => conn.cards).map(card => ({ type: 'card' as const, data: card, timestamp: card.timestamp }));
+    const decisions = decisionBoxes.map(box => ({ type: 'decision' as const, data: box, timestamp: Date.now() })); // TODO: add timestamp to decision boxes
+    const allItems = [...processCards, ...decisions].sort((a, b) => a.timestamp - b.timestamp);
+    
+    if (allItems.length === 0) {
+      return (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="text-center">
+            <div className="relative mb-6">
+              <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/30 to-purple-600/30 rounded-3xl blur-2xl"></div>
+              <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 rounded-3xl flex items-center justify-center mx-auto border-2 border-indigo-500/30">
+                <svg className="w-16 h-16 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-3">Keine Prozessschritte vorhanden</h3>
+            <p className="text-gray-400 text-lg">Erstelle den ersten Prozessschritt</p>
+            <button
+              onClick={openProcessModalWithAutoSender}
+              className="mt-6 px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl font-semibold transition-all shadow-lg"
+            >
+              + Prozessschritt hinzufügen
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Ensure currentCardIndex is within bounds
+    const safeIndex = Math.max(0, Math.min(currentCardIndex, allItems.length - 1));
+    const currentItem = allItems[safeIndex];
+
+    return (
+      <div className="absolute inset-0 flex items-center justify-center p-8 overflow-hidden">
+        {/* Background decoration */}
+        <div className="absolute inset-0 opacity-5 pointer-events-none">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500 rounded-full blur-3xl"></div>
+        </div>
+
+        {/* Navigation Arrows */}
+        <button
+          onClick={() => setCurrentCardIndex(Math.max(0, safeIndex - 1))}
+          disabled={safeIndex === 0}
+          className={`absolute left-8 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full flex items-center justify-center transition-all z-20 ${
+            safeIndex === 0 
+              ? 'bg-slate-800/30 text-gray-600 cursor-not-allowed' 
+              : 'bg-slate-800/80 hover:bg-slate-700/80 text-white hover:scale-110 shadow-xl'
+          }`}
+        >
+          <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => setCurrentCardIndex(Math.min(allItems.length - 1, safeIndex + 1))}
+          disabled={safeIndex === allItems.length - 1}
+          className={`absolute right-8 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full flex items-center justify-center transition-all z-20 ${
+            safeIndex === allItems.length - 1 
+              ? 'bg-slate-800/30 text-gray-600 cursor-not-allowed' 
+              : 'bg-slate-800/80 hover:bg-slate-700/80 text-white hover:scale-110 shadow-xl'
+          }`}
+        >
+          <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+
+        {/* Main Card Stack */}
+        <div className="relative max-w-2xl w-full">
+          {/* Progress Indicator */}
+          <div className="mb-6 flex items-center justify-center gap-2">
+            <span className="text-indigo-300 font-semibold text-sm">
+              Schritt {safeIndex + 1} von {allItems.length}
+            </span>
+            <div className="flex gap-1.5 ml-4">
+              {allItems.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentCardIndex(idx)}
+                  className={`h-2 rounded-full transition-all ${
+                    idx === safeIndex 
+                      ? 'w-8 bg-gradient-to-r from-indigo-500 to-purple-500' 
+                      : 'w-2 bg-slate-600 hover:bg-slate-500'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Card Fan Container - stark überlappend */}
+          <div className="relative flex justify-center items-center py-8" style={{ minHeight: '100vh' }}>
+            {allItems.map((item, idx) => {
+              const isCurrent = idx === safeIndex;
+              const totalCards = allItems.length;
+              const cardWidth = 650; // Noch größere Karten
+              const overlapAmount = 580; // Starke Überlappung - nur 70px Abstand
+              
+              // Berechne die Position - gerade nebeneinander
+              const xOffset = idx * (cardWidth - overlapAmount) - ((totalCards - 1) * (cardWidth - overlapAmount)) / 2;
+
+              // Determine card or decision
+              const isDecision = item.type === 'decision';
+              const itemKey = isDecision ? item.data.id : item.data.id;
+
+              return (
+                <div
+                  key={itemKey}
+                  className="absolute rounded-3xl shadow-2xl cursor-pointer transition-all duration-300"
+                  style={{
+                    width: `${cardWidth}px`,
+                    height: 'calc(100vh - 180px)',
+                    maxHeight: '900px',
+                    left: '50%',
+                    top: '50%',
+                    transform: `translate(calc(-50% + ${xOffset}px), -50%)`,
+                    zIndex: isCurrent ? 100 : 50 + idx,
+                    boxShadow: isCurrent 
+                      ? '0 30px 100px rgba(0, 0, 0, 0.8), 0 0 80px rgba(99, 102, 241, 0.5)' 
+                      : '0 15px 40px rgba(0, 0, 0, 0.6)'
+                  }}
+                  onClick={() => {
+                    setCurrentCardIndex(idx);
+                  }}
+                >
+                  {/* Kartenrückseite - umgedeckt */}
+                  {!isCurrent && (
+                    <div className={`absolute inset-0 rounded-3xl overflow-hidden border-4 shadow-inner ${
+                      isDecision 
+                        ? 'bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-600 border-amber-400/60'
+                        : 'bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 border-indigo-400/60'
+                    }`}>
+                      <div className="absolute inset-0 opacity-20" style={{
+                        backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 15px, rgba(255,255,255,.08) 15px, rgba(255,255,255,.08) 30px)',
+                      }}></div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-white/30 font-bold" style={{ fontSize: '14rem' }}>
+                          {isDecision ? '🔀' : '?'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Karteninhalt - aufgedeckt */}
+                  {isCurrent && isDecision && (() => {
+                    const decisionBox = item.data;
+                    const fromPlayer = players.find(p => p.id === decisionBox.fromPlayerId);
+                    if (!fromPlayer) return null;
+
+                    return (
+                      <div className="absolute inset-0 bg-gradient-to-br from-slate-800/95 via-slate-900 to-slate-800/95 rounded-3xl overflow-hidden border-4 border-amber-500/80">
+                        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-orange-500/5 pointer-events-none"></div>
+                        <div className="relative p-10 h-full flex flex-col">
+                          {/* Card Header */}
+                          <div className="mb-8 text-center flex-shrink-0">
+                            <div className="inline-block px-6 py-3 bg-gradient-to-r from-amber-500/30 to-orange-500/30 rounded-2xl border-2 border-amber-500/40 shadow-lg">
+                              <span className="text-base font-bold text-amber-200 tracking-wider">ENTSCHEIDUNGSPUNKT</span>
+                            </div>
+                          </div>
+
+                          {/* From Player */}
+                          <div className="mb-8 relative flex-shrink-0">
+                            <div className="absolute -left-8 -top-3 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-2xl border-3 border-slate-900 z-10"
+                              style={{ 
+                                backgroundColor: fromPlayer.color,
+                                boxShadow: `0 12px 30px ${fromPlayer.color}60`
+                              }}
+                            >
+                              {fromPlayer.icon}
+                            </div>
+                            <div 
+                              className="ml-12 pl-6 py-3 rounded-2xl border-l-4"
+                              style={{ 
+                                borderColor: fromPlayer.color,
+                                backgroundColor: fromPlayer.color + '18'
+                              }}
+                            >
+                              <div className="text-xs text-gray-400 font-bold tracking-widest mb-1">ENTSCHEIDUNG VON</div>
+                              <div className="font-bold text-white text-lg">{fromPlayer.name}</div>
+                              <div className="text-xs text-gray-400 italic">{fromPlayer.role}</div>
+                            </div>
+                          </div>
+
+                          {/* Decision Question */}
+                          <div className="my-4 relative flex-1 flex items-center">
+                            <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-2xl blur"></div>
+                            <div className="relative bg-gradient-to-br from-slate-700/60 to-slate-800/60 rounded-2xl p-5 border-2 border-amber-400/30 w-full">
+                              <div className="flex items-start gap-4 mb-4">
+                                <div className="text-4xl">❓</div>
+                                <div className="flex-1">
+                                  <div className="text-lg text-white leading-relaxed font-medium">
+                                    {decisionBox.question}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="mt-4 pt-4 border-t border-white/10">
+                                <div className="text-xs text-gray-400 font-bold tracking-widest mb-3">OPTIONEN</div>
+                                <div className="space-y-2">
+                                  {decisionBox.options.map((option, idx) => {
+                                    const toPlayer = players.find(p => p.id === option.toPlayerId);
+                                    if (!toPlayer) return null;
+                                    return (
+                                      <div key={idx} className="flex items-center gap-3 bg-slate-800/40 p-3 rounded-lg border border-white/10">
+                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-lg" style={{ backgroundColor: toPlayer.color }}>
+                                          {toPlayer.icon}
+                                        </div>
+                                        <div className="flex-1">
+                                          <div className="text-sm font-semibold text-white">{option.label}</div>
+                                          {option.description && (
+                                            <div className="text-xs text-gray-400 mt-0.5">{option.description}</div>
+                                          )}
+                                        </div>
+                                        <div className="text-xs text-gray-500">→ {toPlayer.name}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {/* Process Card Content */}
+                  {isCurrent && !isDecision && (() => {
+                    const card = item.data;
+                    const cardFromPlayer = players.find(p => p.id === card.fromPlayerId);
+                    const cardToPlayer = players.find(p => p.id === card.toPlayerId);
+                    
+                    if (!cardFromPlayer || !cardToPlayer) return null;
+
+                    return (
+                    <div className="absolute inset-0 bg-gradient-to-br from-slate-800/95 via-slate-900 to-slate-800/95 rounded-3xl overflow-hidden border-4 border-indigo-500/80">
+                      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-transparent to-purple-500/5 pointer-events-none"></div>
+                      <div className="relative p-10 h-full flex flex-col">
+                        {/* Card Header */}
+                        <div className="mb-8 text-center flex-shrink-0">
+                          <div className="inline-block px-6 py-3 bg-gradient-to-r from-indigo-500/30 to-purple-500/30 rounded-2xl border-2 border-indigo-500/40 shadow-lg">
+                            <span className="text-base font-bold text-indigo-200 tracking-wider">PROZESSSCHRITT</span>
+                          </div>
+                        </div>
+
+                        {/* From Player */}
+                        <div className="mb-8 relative flex-shrink-0">
+                          <div className="absolute -left-8 -top-4 w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-2xl border-4 border-slate-900 z-10"
+                            style={{ 
+                              backgroundColor: cardFromPlayer.color,
+                              boxShadow: `0 12px 30px ${cardFromPlayer.color}60`
+                            }}
+                          >
+                            {cardFromPlayer.icon}
+                          </div>
+                          <div 
+                            className="ml-16 pl-8 py-4 rounded-2xl border-l-4"
+                            style={{ 
+                              borderColor: cardFromPlayer.color,
+                              backgroundColor: cardFromPlayer.color + '18'
+                            }}
+                          >
+                            <div className="text-xs text-gray-400 font-bold tracking-widest mb-1">VON</div>
+                            <div className="font-bold text-white text-xl">{cardFromPlayer.name}</div>
+                            <div className="text-sm text-gray-400 italic">{cardFromPlayer.role}</div>
+                          </div>
+                        </div>
+
+                        {/* Process Description */}
+                        <div className="my-8 relative flex-1 flex items-center">
+                          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-2xl blur"></div>
+                          <div className="relative bg-gradient-to-br from-slate-700/60 to-slate-800/60 rounded-2xl p-8 border-2 border-indigo-400/30 w-full">
+                            <div className="text-xl text-white leading-relaxed font-medium">
+                              {card.text}
+                            </div>
+                            {card.description && (
+                              <div className="mt-4 text-base text-gray-400 italic">
+                                {card.description}
+                              </div>
+                            )}
+                            <div className="mt-5 flex items-center gap-4">
+                              {card.medium && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-500 font-semibold">Medium:</span>
+                                  <span className="px-4 py-1.5 bg-indigo-500/25 border border-indigo-500/40 rounded-lg text-sm text-indigo-300 font-semibold">
+                                    {card.medium}
+                                  </span>
+                                </div>
+                              )}
+                              {card.duration && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-500 font-semibold">Dauer:</span>
+                                  <span className="px-4 py-1.5 bg-purple-500/25 border border-purple-500/40 rounded-lg text-sm text-purple-300 font-semibold">
+                                    {card.duration}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Arrow Indicator */}
+                        <div className="flex justify-center my-6 flex-shrink-0">
+                          <div className="relative">
+                            <div className="absolute inset-0 bg-gradient-to-b from-indigo-500 to-purple-500 rounded-full blur-xl opacity-60"></div>
+                            <div className="relative w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center shadow-lg">
+                              <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                <path d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                              </svg>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* To Player */}
+                        <div className="relative mb-8 flex-shrink-0">
+                          <div className="absolute -right-8 -top-4 w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-2xl border-4 border-slate-900 z-10"
+                            style={{ 
+                              backgroundColor: cardToPlayer.color,
+                              boxShadow: `0 12px 30px ${cardToPlayer.color}60`
+                            }}
+                          >
+                            {cardToPlayer.icon}
+                          </div>
+                          <div 
+                            className="mr-16 pr-8 py-4 rounded-2xl border-r-4"
+                            style={{ 
+                              borderColor: cardToPlayer.color,
+                              backgroundColor: cardToPlayer.color + '18'
+                            }}
+                          >
+                            <div className="text-xs text-gray-400 font-bold tracking-widest mb-1 text-right">AN</div>
+                            <div className="font-bold text-white text-xl text-right">{cardToPlayer.name}</div>
+                            <div className="text-sm text-gray-400 italic text-right">{cardToPlayer.role}</div>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons - only on current card */}
+                        {isCurrent && (
+                          <div className="mt-6 pt-6 border-t-2 border-white/10 space-y-3 flex-shrink-0">
+                            <div className="flex gap-3">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (onUpdateCard) {
+                                    const newText = prompt('Schritt bearbeiten:', card.text);
+                                    if (newText && newText !== card.text) {
+                                      onUpdateCard(card.id, { text: newText });
+                                    }
+                                  }
+                                }}
+                                className="flex-1 px-5 py-3 bg-slate-700/50 hover:bg-slate-600/50 text-white rounded-xl transition-all border border-white/10 font-semibold text-base"
+                              >
+                                ✏️ Bearbeiten
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedFromPlayer(card.toPlayerId);
+                                  setSelectedToPlayer(null);
+                                  setShowProcessModal(true);
+                                }}
+                                className="flex-1 px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl transition-all font-semibold shadow-lg text-base"
+                              >
+                                + Neuer Schritt
+                              </button>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowDecisionModal(true);
+                                setDecisionStarter(card.toPlayerId);
+                              }}
+                              className="w-full px-5 py-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-xl transition-all font-semibold shadow-lg text-base"
+                            >
+                              🔀 Entscheidung hinzufügen
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Render swimlane view with horizontal lanes
@@ -1668,380 +2109,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
     );
   };
 
-  // Render process-centric view with flow diagram
-  const renderProcessCentricView = () => {
-    const connections = getConnections();
-    
-    // Sort connections by round and timestamp for chronological order
-    const sortedConnections = [...connections].sort((a, b) => {
-      const aMinRound = Math.min(...a.cards.map(c => c.round));
-      const bMinRound = Math.min(...b.cards.map(c => c.round));
-      if (aMinRound !== bMinRound) return aMinRound - bMinRound;
-      return a.cards[0].timestamp - b.cards[0].timestamp;
-    });
-    
-    // Smart flow layout - arrange in flowing pattern
-    const flowLayout = sortedConnections.map((conn, index) => {
-      // Stagger layout for visual flow
-      const row = Math.floor(index / 2);
-      const col = index % 2;
-      
-      // Add slight offset for alternating pattern
-      const offsetX = row % 2 === 0 ? 0 : 80;
-      const offsetY = col === 1 ? 40 : 0;
-      
-      return {
-        ...conn,
-        x: col * 450 + 250 + offsetX,
-        y: row * 380 + 200 + offsetY,
-        index
-      };
-    });
-    
-    return (
-      <div className="absolute inset-0 overflow-auto bg-gradient-to-br from-slate-900/50 via-indigo-900/30 to-slate-900/50" style={{ zIndex: 20 }}>
-        <div className="relative min-h-full" style={{ minWidth: '1200px', padding: '80px 60px' }}>
-          {/* Background decoration */}
-          <div className="absolute inset-0 opacity-5 pointer-events-none">
-            <div className="absolute top-20 left-20 w-96 h-96 bg-indigo-500 rounded-full blur-3xl"></div>
-            <div className="absolute bottom-20 right-20 w-96 h-96 bg-purple-500 rounded-full blur-3xl"></div>
-          </div>
-          
-          {/* SVG for connecting lines between process nodes */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }}>
-            <defs>
-              <marker
-                id="arrowhead-process"
-                markerWidth="12"
-                markerHeight="12"
-                refX="10"
-                refY="3"
-                orient="auto"
-                markerUnits="strokeWidth"
-              >
-                <polygon
-                  points="0 0, 12 3, 0 6"
-                  fill="url(#arrow-gradient)"
-                  opacity="0.8"
-                />
-              </marker>
-              
-              <linearGradient id="arrow-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" style={{ stopColor: '#6366f1', stopOpacity: 0.6 }} />
-                <stop offset="100%" style={{ stopColor: '#8b5cf6', stopOpacity: 0.8 }} />
-              </linearGradient>
-              
-              <linearGradient id="line-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style={{ stopColor: '#6366f1', stopOpacity: 0.6 }} />
-                <stop offset="50%" style={{ stopColor: '#8b5cf6', stopOpacity: 0.5 }} />
-                <stop offset="100%" style={{ stopColor: '#ec4899', stopOpacity: 0.4 }} />
-              </linearGradient>
-              
-              {/* Glow filter for lines */}
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-                <feMerge>
-                  <feMergeNode in="coloredBlur"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-              </filter>
-            </defs>
-            
-            {/* Draw flow lines between sequential processes */}
-            {flowLayout.map((node, idx) => {
-              if (idx === 0) return null;
-              
-              const prevNode = flowLayout[idx - 1];
-              const fromX = prevNode.x;
-              const fromY = prevNode.y + 100; // Start from bottom of card
-              const toX = node.x;
-              const toY = node.y - 100; // End at top of card
-              
-              // Check if processes are connected (share players)
-              const isConnected = prevNode.to === node.from;
-              
-              // Beautiful curved path
-              const controlY1 = fromY + 60;
-              const controlY2 = toY - 60;
-              
-              // S-curve for smooth flow
-              const path = `M ${fromX} ${fromY} C ${fromX} ${controlY1}, ${toX} ${controlY2}, ${toX} ${toY}`;
-              
-              return (
-                <g key={`flow-${idx}`}>
-                  {/* Glow background */}
-                  <path
-                    d={path}
-                    stroke="url(#line-gradient)"
-                    strokeWidth="8"
-                    fill="none"
-                    opacity="0.15"
-                    filter="url(#glow)"
-                  />
-                  {/* Main line */}
-                  <path
-                    d={path}
-                    stroke={isConnected ? "url(#line-gradient)" : "#6366f1"}
-                    strokeWidth="3"
-                    fill="none"
-                    opacity={isConnected ? "0.7" : "0.3"}
-                    strokeDasharray={isConnected ? "0" : "8,4"}
-                    markerEnd="url(#arrowhead-process)"
-                    className="transition-all"
-                  />
-                  
-                  {/* Flow indicator circles */}
-                  {isConnected && [0.3, 0.5, 0.7].map((t, i) => {
-                    const x = fromX * Math.pow(1-t, 3) + 3 * fromX * Math.pow(1-t, 2) * t + 
-                              3 * toX * (1-t) * Math.pow(t, 2) + toX * Math.pow(t, 3);
-                    const y = fromY * Math.pow(1-t, 3) + 3 * controlY1 * Math.pow(1-t, 2) * t + 
-                              3 * controlY2 * (1-t) * Math.pow(t, 2) + toY * Math.pow(t, 3);
-                    
-                    return (
-                      <circle
-                        key={i}
-                        cx={x}
-                        cy={y}
-                        r="4"
-                        fill="#8b5cf6"
-                        opacity="0.5"
-                      >
-                        <animate
-                          attributeName="opacity"
-                          values="0.3;0.8;0.3"
-                          dur="2s"
-                          begin={`${i * 0.3}s`}
-                          repeatCount="indefinite"
-                        />
-                      </circle>
-                    );
-                  })}
-                </g>
-              );
-            })}
-          </svg>
-          
-          {/* Process Nodes */}
-          {flowLayout.map((node) => {
-            const fromPlayer = players.find(p => p.id === node.from);
-            const toPlayer = players.find(p => p.id === node.to);
-            
-            if (!fromPlayer || !toPlayer) return null;
-            
-            return (
-              <div
-                key={`${node.from}-${node.to}`}
-                className="absolute"
-                style={{
-                  left: `${node.x}px`,
-                  top: `${node.y}px`,
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: 10,
-                }}
-              >
-                {/* Process Node Card */}
-                <div
-                  className="bg-gradient-to-br from-slate-800/95 via-slate-800/90 to-slate-900/95 backdrop-blur-xl rounded-3xl shadow-2xl border-2 border-indigo-500/40 hover:border-indigo-400/70 transition-all duration-500 p-6 cursor-pointer hover:scale-105 hover:-translate-y-2 relative group"
-                  style={{ width: '340px' }}
-                  onClick={() => {
-                    if (node.cards.length > 0) {
-                      setInspectedProcessStep(node.cards[0].id);
-                    }
-                  }}
-                >
-                  {/* Animated Glow effect */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 rounded-3xl blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                  <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-3xl opacity-20 blur group-hover:opacity-40 transition-opacity duration-500"></div>
-                  
-                  <div className="relative">
-                    {/* Process Header */}
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg">
-                          <GitBranch className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-indigo-400/70 tracking-wider">
-                            PROZESS
-                          </span>
-                          <div className="text-lg font-black text-white">
-                            #{node.index + 1}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-3 py-1.5 bg-gradient-to-br from-indigo-500/30 to-purple-500/30 rounded-xl border border-indigo-400/30">
-                        <span className="text-xs font-bold text-indigo-200">
-                          {node.count} {node.count === 1 ? 'Schritt' : 'Schritte'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* From Player - Pinned Badge */}
-                    <div className="relative mb-8">
-                      <div 
-                        className="absolute -left-5 -top-3 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-2xl border-4 border-slate-900 transform -rotate-12 hover:rotate-0 hover:scale-110 transition-all duration-300 cursor-pointer z-20"
-                        style={{ 
-                          backgroundColor: fromPlayer.color,
-                          boxShadow: `0 12px 30px ${fromPlayer.color}60, inset 0 -4px 12px rgba(0,0,0,0.4), inset 0 2px 8px rgba(255,255,255,0.3)`
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInspectedPlayer(fromPlayer.id);
-                        }}
-                        title={fromPlayer.name}
-                      >
-                        <span className="drop-shadow-2xl filter brightness-110">{fromPlayer.icon}</span>
-                        {/* Pin effect with shadow */}
-                        <div className="absolute -top-2 -right-2 w-4 h-4 bg-gradient-to-br from-red-400 to-red-600 rounded-full border-3 border-slate-900 shadow-xl">
-                          <div className="absolute inset-0 bg-white/30 rounded-full blur-sm"></div>
-                        </div>
-                      </div>
-                      
-                      <div 
-                        className="ml-16 pl-5 py-3 rounded-xl border-l-4 hover:bg-white/10 transition-all duration-300 cursor-pointer group/player"
-                        style={{ 
-                          borderColor: fromPlayer.color,
-                          backgroundColor: fromPlayer.color + '15',
-                          boxShadow: `inset 0 0 20px ${fromPlayer.color}10`
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInspectedPlayer(fromPlayer.id);
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="text-[10px] text-gray-400 font-bold tracking-widest">STARTER</div>
-                          <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: fromPlayer.color }}></div>
-                        </div>
-                        <div className="font-bold text-white text-base group-hover/player:text-lg transition-all">{fromPlayer.name}</div>
-                        <div className="text-xs text-gray-400 italic">{fromPlayer.role}</div>
-                      </div>
-                    </div>
-
-                    {/* Flow Arrow */}
-                    <div className="flex justify-center mb-8 relative">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="h-10 w-1 bg-gradient-to-b from-transparent via-indigo-400/50 to-transparent rounded-full"></div>
-                        <div className="relative">
-                          <div className="absolute inset-0 bg-indigo-500 rounded-full blur-lg opacity-50 animate-pulse"></div>
-                          <div className="relative w-12 h-12 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-full flex items-center justify-center shadow-xl">
-                            <div className="text-white text-2xl font-bold animate-bounce">↓</div>
-                          </div>
-                        </div>
-                        <div className="h-10 w-1 bg-gradient-to-b from-transparent via-purple-400/50 to-transparent rounded-full"></div>
-                      </div>
-                    </div>
-
-                    {/* To Player - Pinned Badge */}
-                    <div className="relative mb-6">
-                      <div 
-                        className="absolute -right-5 -top-3 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-2xl border-4 border-slate-900 transform rotate-12 hover:rotate-0 hover:scale-110 transition-all duration-300 cursor-pointer z-20"
-                        style={{ 
-                          backgroundColor: toPlayer.color,
-                          boxShadow: `0 12px 30px ${toPlayer.color}60, inset 0 -4px 12px rgba(0,0,0,0.4), inset 0 2px 8px rgba(255,255,255,0.3)`
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInspectedPlayer(toPlayer.id);
-                        }}
-                        title={toPlayer.name}
-                      >
-                        <span className="drop-shadow-2xl filter brightness-110">{toPlayer.icon}</span>
-                        {/* Pin effect with shadow */}
-                        <div className="absolute -top-2 -left-2 w-4 h-4 bg-gradient-to-br from-red-400 to-red-600 rounded-full border-3 border-slate-900 shadow-xl">
-                          <div className="absolute inset-0 bg-white/30 rounded-full blur-sm"></div>
-                        </div>
-                      </div>
-                      
-                      <div 
-                        className="mr-16 pr-5 py-3 rounded-xl border-r-4 hover:bg-white/10 transition-all duration-300 cursor-pointer group/player"
-                        style={{ 
-                          borderColor: toPlayer.color,
-                          backgroundColor: toPlayer.color + '15',
-                          boxShadow: `inset 0 0 20px ${toPlayer.color}10`
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInspectedPlayer(toPlayer.id);
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: toPlayer.color }}></div>
-                          <div className="text-[10px] text-gray-400 font-bold tracking-widest">EMPFÄNGER</div>
-                        </div>
-                        <div className="font-bold text-white text-base text-right group-hover/player:text-lg transition-all">{toPlayer.name}</div>
-                        <div className="text-xs text-gray-400 italic text-right">{toPlayer.role}</div>
-                      </div>
-                    </div>
-
-                    {/* Communication Objects */}
-                    {node.cards[0]?.communicationObjectIds && node.cards[0].communicationObjectIds.length > 0 && (
-                      <div className="mb-4">
-                        <div className="text-[10px] text-gray-500 font-bold tracking-widest mb-2 text-center">KOMMUNIKATION</div>
-                        <div className="flex flex-wrap gap-2 justify-center">
-                          {node.cards[0].communicationObjectIds.map(objId => {
-                            const commObj = processObjects.find(obj => obj.id === objId);
-                            if (!commObj) return null;
-                            return (
-                              <div
-                                key={objId}
-                                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs shadow-lg hover:scale-110 transition-transform duration-300 cursor-pointer"
-                                style={{ 
-                                  backgroundColor: commObj.color + '30',
-                                  border: `2px solid ${commObj.color}`,
-                                  boxShadow: `0 4px 12px ${commObj.color}50, inset 0 0 20px ${commObj.color}20`
-                                }}
-                                title={commObj.name}
-                              >
-                                <span className="text-lg">{commObj.icon}</span>
-                                <span className="font-semibold text-white">{commObj.name}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Latest Step Preview */}
-                    {node.cards.length > 0 && (
-                      <div className="relative">
-                        <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-xl blur"></div>
-                        <div className="relative text-sm text-gray-200 line-clamp-3 bg-gradient-to-br from-slate-700/80 to-slate-800/80 rounded-xl p-4 border border-indigo-400/30 italic leading-relaxed">
-                          <span className="text-indigo-400 font-bold">"</span>
-                          {node.cards[node.cards.length - 1].text}
-                          <span className="text-indigo-400 font-bold">"</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Empty State */}
-          {sortedConnections.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <div className="relative mb-6">
-                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/30 to-purple-600/30 rounded-3xl blur-2xl"></div>
-                  <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 rounded-3xl flex items-center justify-center mx-auto border-2 border-indigo-500/30">
-                    <GitBranch className="w-16 h-16 text-indigo-400" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-bold text-white mb-3">Keine Prozesse vorhanden</h3>
-                <p className="text-gray-400 text-lg">Erstelle Prozessschritte zwischen Spielern</p>
-                <div className="mt-6 text-sm text-gray-500">
-                  Wechsel zurück zur Spieleransicht, um Prozesse zu erstellen
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 overflow-hidden">
       {/* Professional Header */}
@@ -2059,26 +2126,28 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
           {/* Right side buttons */}
           <div className="flex items-center gap-3">
-            {/* View Mode Cycle Button */}
+            {/* View Mode Toggle Button */}
             <button
               onClick={() => {
-                if (viewMode === 'player-centric') setViewMode('process-centric');
-                else if (viewMode === 'process-centric') setViewMode('swimlane');
+                if (viewMode === 'player-centric') setViewMode('eingabe');
+                else if (viewMode === 'eingabe') setViewMode('swimlane');
                 else setViewMode('player-centric');
               }}
               className="flex items-center gap-2 px-4 py-3 bg-slate-700/50 hover:bg-slate-600/50 text-white rounded-xl transition-all border border-white/10"
               title={
-                viewMode === 'player-centric' ? 'Zu Prozessansicht wechseln' : 
-                viewMode === 'process-centric' ? 'Zu Swimlane-Ansicht wechseln' :
+                viewMode === 'player-centric' ? 'Zu Eingabe-Ansicht wechseln' :
+                viewMode === 'eingabe' ? 'Zu Swimlane-Ansicht wechseln' :
                 'Zu Spieleransicht wechseln'
               }
             >
               {viewMode === 'player-centric' ? (
                 <>
-                  <Network className="w-5 h-5" />
-                  <span className="hidden sm:inline">Prozessansicht</span>
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <span className="hidden sm:inline">Eingabe</span>
                 </>
-              ) : viewMode === 'process-centric' ? (
+              ) : viewMode === 'eingabe' ? (
                 <>
                   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="2" y="4" width="20" height="4" rx="1" />
@@ -2105,6 +2174,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 <span className="hidden sm:inline">Spieleransicht</span>
               </button>
             )}
+            
+            {/* Ergebnisse Button */}
+            <button
+              onClick={() => setShowResultsModal(true)}
+              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl transition-all shadow-lg font-semibold"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+              <span className="hidden sm:inline">Ergebnisse</span>
+            </button>
             
             {/* Share Button */}
             {gameId && (
@@ -2205,7 +2285,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 <div className="h-px bg-white/10 my-1 mx-3"></div>
                 <button
                   onClick={() => {
-                    setShowProcessModal(true);
+                    openProcessModalWithAutoSender();
                     setShowDropdown(false);
                   }}
                   disabled={players.filter(p => p.onBoard !== false).length < 2}
@@ -2347,8 +2427,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
           >
           
           {/* Render based on viewMode */}
-          {viewMode === 'process-centric' ? (
-            renderProcessCentricView()
+          {viewMode === 'eingabe' ? (
+            renderEingabeView()
           ) : viewMode === 'swimlane' ? (
             renderSwimlaneView()
           ) : (
@@ -5247,6 +5327,188 @@ const GameBoard: React.FC<GameBoardProps> = ({
             </div>
           </div>
         </div>
+        </div>
+      )}
+
+      {/* Ergebnisse Modal */}
+      {showResultsModal && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-6"
+          onClick={() => setShowResultsModal(false)}
+        >
+          <div 
+            className="bg-gradient-to-br from-slate-800 via-slate-900 to-slate-800 rounded-3xl shadow-2xl border border-white/20 max-w-5xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="sticky top-0 bg-gradient-to-r from-slate-800 to-slate-900 border-b border-white/10 p-6 rounded-t-3xl backdrop-blur-xl z-10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-xl">
+                    <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-3xl font-bold text-white">Spielergebnisse</h2>
+                    <p className="text-gray-400">Exportiere und teile deine Prozessergebnisse</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowResultsModal(false)}
+                  className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Content - Kacheln Grid */}
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Swim Lane Darstellung */}
+                <button
+                  onClick={() => {
+                    setViewMode('swimlane');
+                    setShowResultsModal(false);
+                  }}
+                  className="group relative bg-gradient-to-br from-blue-500/10 to-indigo-600/10 hover:from-blue-500/20 hover:to-indigo-600/20 border-2 border-blue-500/30 hover:border-blue-400/50 rounded-2xl p-6 text-left transition-all duration-300 hover:scale-105 hover:-translate-y-1"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-indigo-600/20 rounded-2xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity"></div>
+                  <div className="relative">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="2" y="4" width="20" height="4" rx="1" />
+                          <rect x="2" y="10" width="20" height="4" rx="1" />
+                          <rect x="2" y="16" width="20" height="4" rx="1" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-bold text-white">Swim Lane Darstellung</h3>
+                    </div>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                      Visualisiere Prozesse in horizontalen Bahnen pro Akteur
+                    </p>
+                  </div>
+                </button>
+
+                {/* Prozessdokumentation */}
+                <button
+                  className="group relative bg-gradient-to-br from-purple-500/10 to-pink-600/10 hover:from-purple-500/20 hover:to-pink-600/20 border-2 border-purple-500/30 hover:border-purple-400/50 rounded-2xl p-6 text-left transition-all duration-300 hover:scale-105 hover:-translate-y-1 opacity-50 cursor-not-allowed"
+                  disabled
+                >
+                  <div className="relative">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-bold text-white">Prozessdokumentation erstellen</h3>
+                    </div>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                      Generiere automatisch eine strukturierte Prozessbeschreibung
+                    </p>
+                    <div className="mt-3 inline-block px-3 py-1 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs text-yellow-300 font-semibold">
+                      Bald verfügbar
+                    </div>
+                  </div>
+                </button>
+
+                {/* Prozessschulung (Ablaufmatrix) */}
+                <button
+                  className="group relative bg-gradient-to-br from-emerald-500/10 to-teal-600/10 hover:from-emerald-500/20 hover:to-teal-600/20 border-2 border-emerald-500/30 hover:border-emerald-400/50 rounded-2xl p-6 text-left transition-all duration-300 hover:scale-105 hover:-translate-y-1 opacity-50 cursor-not-allowed"
+                  disabled
+                >
+                  <div className="relative">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-bold text-white">Prozessschulung (Ablaufmatrix)</h3>
+                    </div>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                      Erstelle Schulungsunterlagen mit detaillierter Ablaufmatrix
+                    </p>
+                    <div className="mt-3 inline-block px-3 py-1 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs text-yellow-300 font-semibold">
+                      Bald verfügbar
+                    </div>
+                  </div>
+                </button>
+
+                {/* Kommunikationsmatrix */}
+                <button
+                  className="group relative bg-gradient-to-br from-orange-500/10 to-red-600/10 hover:from-orange-500/20 hover:to-red-600/20 border-2 border-orange-500/30 hover:border-orange-400/50 rounded-2xl p-6 text-left transition-all duration-300 hover:scale-105 hover:-translate-y-1 opacity-50 cursor-not-allowed"
+                  disabled
+                >
+                  <div className="relative">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-bold text-white">Kommunikationsmatrix</h3>
+                    </div>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                      Analysiere Kommunikationsflüsse zwischen Akteuren
+                    </p>
+                    <div className="mt-3 inline-block px-3 py-1 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs text-yellow-300 font-semibold">
+                      Bald verfügbar
+                    </div>
+                  </div>
+                </button>
+
+                {/* Systemliste */}
+                <button
+                  className="group relative bg-gradient-to-br from-cyan-500/10 to-blue-600/10 hover:from-cyan-500/20 hover:to-blue-600/20 border-2 border-cyan-500/30 hover:border-cyan-400/50 rounded-2xl p-6 text-left transition-all duration-300 hover:scale-105 hover:-translate-y-1 opacity-50 cursor-not-allowed"
+                  disabled
+                >
+                  <div className="relative">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-bold text-white">Systemliste erstellen</h3>
+                    </div>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                      Erfasse alle verwendeten Systeme und Tools im Prozess
+                    </p>
+                    <div className="mt-3 inline-block px-3 py-1 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs text-yellow-300 font-semibold">
+                      Bald verfügbar
+                    </div>
+                  </div>
+                </button>
+
+                {/* Vorschlag Prozessverbesserung */}
+                <button
+                  className="group relative bg-gradient-to-br from-violet-500/10 to-fuchsia-600/10 hover:from-violet-500/20 hover:to-fuchsia-600/20 border-2 border-violet-500/30 hover:border-violet-400/50 rounded-2xl p-6 text-left transition-all duration-300 hover:scale-105 hover:-translate-y-1 opacity-50 cursor-not-allowed"
+                  disabled
+                >
+                  <div className="relative">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-bold text-white">Vorschlag Prozessverbesserung</h3>
+                    </div>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                      KI-basierte Optimierungsvorschläge für deinen Prozess
+                    </p>
+                    <div className="mt-3 inline-block px-3 py-1 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs text-yellow-300 font-semibold">
+                      Bald verfügbar
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
