@@ -1,6 +1,6 @@
 import React from 'react';
-import { Player, ProcessCard, ProcessObject, PLAYER_COLORS, DEFAULT_ROLES, PLAYER_ICONS, GameBoardView, DECISION_ICONS } from '../types/game';
-import { Users, Plus, Trash2, ChevronDown, UserPlus, GitBranch, X, Share2, User, Settings, LayoutGrid } from 'lucide-react';
+import { Player, ProcessCard, ProcessObject, ProcessStep, PLAYER_COLORS, DEFAULT_ROLES, PLAYER_ICONS, GameBoardView, DECISION_ICONS } from '../types/game';
+import { Users, Plus, Trash2, ChevronDown, UserPlus, GitBranch, X, Share2, User, Settings, LayoutGrid, Copy } from 'lucide-react';
 import ShareGameModal from './ShareGameModal';
 import IconPicker from './IconPicker';
 import ProcessObjectToolbox from './ProcessObjectToolbox';
@@ -14,6 +14,7 @@ interface GameBoardProps {
   maxRounds: number;
   onAddCard: (text: string, fromPlayerId: string, toPlayerId: string, medium?: string, duration?: string, description?: string) => void;
   onUpdateCard?: (cardId: string, updates: Partial<ProcessCard>) => void;
+  onRemoveCard?: (cardId: string) => void;
   onEndTurn: () => void;
   onRestart: () => void;
   isGameFinished: boolean;
@@ -25,7 +26,6 @@ interface GameBoardProps {
   onRemoveProcessObject: (objectId: string) => void;
   onUpdateProcessObject?: (objectId: string, updates: Partial<ProcessObject>) => void;
   gameId?: string;
-  onSwitchToPlayerView?: () => void;
 }
 
 const GameBoard: React.FC<GameBoardProps> = ({
@@ -34,6 +34,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   processObjects,
   onAddCard,
   onUpdateCard,
+  onRemoveCard,
   onAddPlayer,
   onRemovePlayer,
   onUpdatePlayerPosition,
@@ -41,7 +42,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
   onRemoveProcessObject,
   onUpdateProcessObject,
   gameId,
-  onSwitchToPlayerView,
 }) => {
   const [showDropdown, setShowDropdown] = React.useState(false);
   const [showPlayerModal, setShowPlayerModal] = React.useState(false);
@@ -68,13 +68,14 @@ const GameBoard: React.FC<GameBoardProps> = ({
   
   // Drag & Drop
   const [draggedPlayer, setDraggedPlayer] = React.useState<string | null>(null);
+  const [draggedProcessStep, setDraggedProcessStep] = React.useState<string | null>(null);
   const gameBoardRef = React.useRef<HTMLDivElement>(null);
   
   // Placed communication objects on field
   const [placedCommObjects, setPlacedCommObjects] = React.useState<Array<{ objectId: string; x: number; y: number }>>([]);
   
   // Process Step Detail View
-  const [selectedConnection, setSelectedConnection] = React.useState<{ from: string; to: string } | null>(null);
+  const [selectedConnection, setSelectedConnection] = React.useState<{ from: string; to?: string } | null>(null);
   
   // Player context menu
   const [contextMenuPlayer, setContextMenuPlayer] = React.useState<string | null>(null);
@@ -92,10 +93,10 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [inspectedDecisionBox, setInspectedDecisionBox] = React.useState<string | null>(null);
   
   // Hover state for connections
-  const [hoveredConnection, setHoveredConnection] = React.useState<{ from: string; to: string } | null>(null);
+  const [hoveredConnection, setHoveredConnection] = React.useState<{ from: string; to?: string } | null>(null);
   
   // Quick info card for connections (similar to player cards)
-  const [selectedConnectionDetail, setSelectedConnectionDetail] = React.useState<{ from: string; to: string; x: number; y: number } | null>(null);
+  const [selectedConnectionDetail, setSelectedConnectionDetail] = React.useState<{ from: string; to?: string; x: number; y: number } | null>(null);
   
   // Drag preview position for waiting area players
   const [dragPreviewPosition, setDragPreviewPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -133,14 +134,16 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [dragConnectionFrom, setDragConnectionFrom] = React.useState<string | null>(null);
   const [dragConnectionPosition, setDragConnectionPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [showConnectionTypeMenu, setShowConnectionTypeMenu] = React.useState(false);
-  const [connectionMenuPosition, setConnectionMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
+  const [connectionMenuPosition, _setConnectionMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [connectionMenuTarget, setConnectionMenuTarget] = React.useState<string | null>(null);
   
   // View mode state
   const [viewMode, setViewMode] = React.useState<GameBoardView>('player-centric');
   
-  // Eingabe view state - for card navigation
-  const [currentCardIndex, setCurrentCardIndex] = React.useState(0);
+  // Management menu state
+  const [showManagementMenu, setShowManagementMenu] = React.useState(false);
+  const [saveName, setSaveName] = React.useState('');
+  const [saveMessage, setSaveMessage] = React.useState('');
   
   // State for decision creation
   const [isDecisionMode, setIsDecisionMode] = React.useState(false);
@@ -163,26 +166,58 @@ const GameBoard: React.FC<GameBoardProps> = ({
     type: 'binary' | 'multiple';
   }>>([]);
 
-  // Keyboard navigation for Eingabe view
+  // Keyboard event handler für Delete/Backspace auf ausgewählten Connections
   React.useEffect(() => {
-    if (viewMode !== 'eingabe') return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      const connections = getConnections();
-      const allCards = connections.flatMap(conn => conn.cards).sort((a, b) => a.timestamp - b.timestamp);
+      // Delete/Backspace: Lösche ausgewählte Connection
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedConnectionDetail) {
+        e.preventDefault();
+        
+        console.log('🗑️ Versuche Connection zu löschen:', selectedConnectionDetail);
+        
+        // Finde alle Cards dieser Connection und lösche sie
+        const connection = getConnections().find(
+          c => c.from === selectedConnectionDetail.from && c.to === selectedConnectionDetail.to
+        );
+        
+        if (connection && onRemoveCard) {
+          console.log('🗑️ Lösche Connection mit', connection.cards.length, 'Karten');
+          connection.cards.forEach(card => {
+            console.log('🗑️ Lösche Karte:', card.id);
+            onRemoveCard(card.id);
+          });
+          setSelectedConnectionDetail(null);
+        } else {
+          console.log('❌ Connection nicht gefunden oder onRemoveCard fehlt');
+        }
+      }
       
-      if (e.key === 'ArrowLeft') {
+      // Strg+C: Kopiere ausgewählten Spieler
+      if (e.ctrlKey && e.key === 'c' && inspectedPlayer) {
         e.preventDefault();
-        setCurrentCardIndex(prev => Math.max(0, prev - 1));
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        setCurrentCardIndex(prev => Math.min(allCards.length - 1, prev + 1));
+        
+        const player = players.find(p => p.id === inspectedPlayer);
+        if (player) {
+          console.log('📋 Kopiere Spieler:', player.name);
+          
+          // Erstelle Kopie mit neuem Namen und ID
+          const newPlayer: Player = {
+            ...player,
+            id: `player-${Date.now()}`,
+            name: `${player.name} (Kopie)`,
+            onBoard: false, // Kopie startet im Wartebereich
+            position: undefined, // Keine Position
+          };
+          
+          onAddPlayer(newPlayer);
+          console.log('✅ Spieler kopiert:', newPlayer.name);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [viewMode, currentCardIndex, cards]);
+  }, [selectedConnectionDetail, inspectedPlayer, players, cards, onRemoveCard, onAddPlayer]);
 
   // Helper function to get the last recipient (for auto-selecting next sender)
   const getLastRecipient = () => {
@@ -853,8 +888,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
     });
   };
 
-  const handleEndDragConnection = (e: React.MouseEvent, targetPlayerId?: string) => {
-    console.log('🎯 handleEndDragConnection called', { isDraggingConnection, dragConnectionFrom, targetPlayerId });
+  const handleEndDragConnection = (targetPlayerId?: string) => {
+    console.log('🎯 handleEndDragConnection called', { isDraggingConnection, dragConnectionFrom, targetPlayerId, dragConnectionPosition });
     
     if (!isDraggingConnection || !dragConnectionFrom) {
       setIsDraggingConnection(false);
@@ -863,18 +898,65 @@ const GameBoard: React.FC<GameBoardProps> = ({
       return;
     }
     
-    // Always show menu - either for connection to player or for creating new element
-    console.log('✅ Opening connection menu at', e.clientX, e.clientY, 'position:', dragConnectionPosition);
-    setConnectionMenuPosition({
-      x: e.clientX,
-      y: e.clientY
-    });
-    setConnectionMenuTarget(targetPlayerId || null); // null means "empty space"
-    setShowConnectionTypeMenu(true);
+    const fromPlayer = players.find(p => p.id === dragConnectionFrom);
+    if (!fromPlayer) {
+      setIsDraggingConnection(false);
+      setDragConnectionFrom(null);
+      setDragConnectionPosition(null);
+      return;
+    }
     
-    // Keep dragConnectionPosition - needed for placing player at drop location
+    // Wenn Ziel ein Spieler ist, erstelle direkt eine Prozesslinie
+    if (targetPlayerId) {
+      const toPlayer = players.find(p => p.id === targetPlayerId);
+      
+      if (toPlayer && onAddCard) {
+        // Erstelle eine einfache Prozessverbindung
+        onAddCard(
+          `Prozess: ${fromPlayer.name} → ${toPlayer.name}`,
+          dragConnectionFrom,
+          targetPlayerId,
+          '', // medium
+          '', // duration
+          '' // description
+        );
+      }
+    } else {
+      // Ins Leere gezogen - erstelle Prozess-Karte ohne Empfänger MIT Position
+      if (onAddCard && dragConnectionPosition) {
+        const endPosition = { x: dragConnectionPosition.x, y: dragConnectionPosition.y };
+        console.log('📍 Erstelle freien Prozessschritt von', fromPlayer.name, 'zu Position:', endPosition);
+        
+        onAddCard(
+          `Prozess von ${fromPlayer.name}`,
+          dragConnectionFrom,
+          '', // kein Empfänger
+          '', // medium
+          '', // duration
+          '' // description
+        );
+        
+        // Speichere die Position des offenen Endes
+        // Finde die gerade erstellte Card (neueste ohne toPlayerId von diesem fromPlayerId)
+        setTimeout(() => {
+          const newCard = cards
+            .filter(c => c.fromPlayerId === dragConnectionFrom && !c.toPlayerId)
+            .sort((a, b) => b.timestamp - a.timestamp)[0];
+          
+          if (newCard && onUpdateCard) {
+            console.log('💾 Speichere openEndPosition:', endPosition);
+            onUpdateCard(newCard.id, {
+              openEndPosition: endPosition
+            });
+          }
+        }, 100);
+      }
+    }
+    
+    // Reset
     setIsDraggingConnection(false);
-    // Don't reset dragConnectionPosition yet!
+    setDragConnectionFrom(null);
+    setDragConnectionPosition(null);
   };
 
   const handlePlayerContextClick = (e: React.MouseEvent, playerId: string) => {
@@ -900,6 +982,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent, playerId: string) => {
+    console.log('👆 handleMouseDown called', playerId);
     if (showProcessModal) return; // Don't drag during process modal
     
     // Close context menu if open
@@ -910,14 +993,24 @@ const GameBoard: React.FC<GameBoardProps> = ({
     e.preventDefault();
     e.stopPropagation();
     
+    console.log('✅ Setting draggedPlayer to', playerId);
     setDraggedPlayer(playerId);
   };
 
+  const handleProcessStepMouseDown = (e: React.MouseEvent, processStepId: string) => {
+    if (showProcessModal) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setDraggedProcessStep(processStepId);
+  };
+
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!draggedPlayer || !gameBoardRef.current) return;
+    if ((!draggedPlayer && !draggedProcessStep) || !gameBoardRef.current) return;
     
     // Check if dragging a decision box
-    if (draggedPlayer.startsWith('decision-')) {
+    if (draggedPlayer && draggedPlayer.startsWith('decision-')) {
       const decisionId = draggedPlayer.replace('decision-', '');
       const boardRect = gameBoardRef.current.getBoundingClientRect();
       const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
@@ -934,6 +1027,19 @@ const GameBoard: React.FC<GameBoardProps> = ({
       return;
     }
     
+    // Drag-Preview für Prozessschritte
+    if (draggedProcessStep) {
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      setDragPreviewPosition({ x: clampedX, y: clampedY });
+      return;
+    }
+    
     const player = players.find(p => p.id === draggedPlayer);
     if (!player) return;
     
@@ -947,7 +1053,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     
     // Wenn der Spieler bereits auf dem Board ist (hat eine Position oder onBoard === true), aktualisiere die Position
     if (player.onBoard === true || (player.onBoard !== false && player.position)) {
-      if (onUpdatePlayerPosition) {
+      if (onUpdatePlayerPosition && draggedPlayer) {
         onUpdatePlayerPosition(draggedPlayer, { x: clampedX, y: clampedY });
       }
     }
@@ -958,11 +1064,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
-    // Wenn ein Spieler aus dem Wartebereich gezogen wurde
-    if (draggedPlayer && gameBoardRef.current) {
-      const player = players.find(p => p.id === draggedPlayer);
+    console.log('🖱️ handleMouseUp called', { draggedPlayer, draggedProcessStep });
+    
+    // Speichere die Werte BEVOR sie zurückgesetzt werden
+    const currentDraggedPlayer = draggedPlayer;
+    const currentDraggedProcessStep = draggedProcessStep;
+    
+    // Wenn ein Spieler gezogen wurde (aus Wartebereich ODER bereits auf dem Board)
+    if (currentDraggedPlayer && gameBoardRef.current) {
+      const player = players.find(p => p.id === currentDraggedPlayer);
       
-      if (player && player.onBoard === false) {
+      if (player) {
         const boardRect = gameBoardRef.current.getBoundingClientRect();
         const mouseX = e.clientX;
         const mouseY = e.clientY;
@@ -973,19 +1085,166 @@ const GameBoard: React.FC<GameBoardProps> = ({
                            mouseY >= boardRect.top && 
                            mouseY <= boardRect.bottom;
         
-        if (isOverBoard && onUpdatePlayerPosition) {
+        if (isOverBoard) {
           // Berechne Position auf dem Spielfeld
-          const x = ((mouseX - boardRect.left) / boardRect.width) * 100;
-          const y = ((mouseY - boardRect.top) / boardRect.height) * 100;
-          const clampedX = Math.max(8, Math.min(92, x));
-          const clampedY = Math.max(8, Math.min(92, y));
+          const dropX = ((mouseX - boardRect.left) / boardRect.width) * 100;
+          const dropY = ((mouseY - boardRect.top) / boardRect.height) * 100;
           
-          // Setze Position und onBoard auf true
-          onUpdatePlayerPosition(draggedPlayer, { x: clampedX, y: clampedY });
+          // Prüfe ob Spieler auf eine offene Verbindung gezogen wird
+          const openConnections = cards.filter(card => card.fromPlayerId && !card.toPlayerId);
+          console.log('🔍 Offene Verbindungen gefunden:', openConnections.length, openConnections);
+          let connectedToOpenEnd = false;
+          
+          for (const card of openConnections) {
+            const fromPlayer = players.find(p => p.id === card.fromPlayerId);
+            if (!fromPlayer) continue;
+            
+            const fromPlayerIndex = players.indexOf(fromPlayer);
+            const fromPos = getPlayerPosition(fromPlayer, fromPlayerIndex, players.length);
+            
+            // Berechne wo das offene Ende der Linie ist
+            // Verwende gespeicherte Position falls vorhanden, sonst default 20% nach rechts
+            const openEndX = card.openEndPosition?.x ?? (fromPos.x + 20);
+            const openEndY = card.openEndPosition?.y ?? fromPos.y;
+            
+            // Prüfe Abstand zum offenen Ende
+            const dx = dropX - openEndX;
+            const dy = dropY - openEndY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            console.log('📏 Abstand zum offenen Ende:', distance, 'Position:', { dropX, dropY, openEndX, openEndY });
+            
+            if (distance < 8) { // 8% Radius für Snap
+              console.log('🔗 Spieler wird an offenes Ende angedockt', card.fromPlayerId, '→', player.name);
+              
+                // Aktualisiere die Karte mit dem neuen Empfänger
+                if (onUpdateCard) {
+                  onUpdateCard(card.id, {
+                    toPlayerId: player.id,
+                    text: `Prozess: ${fromPlayer.name} → ${player.name}`
+                  });
+                }              // Platziere Spieler in der Nähe des offenen Endes
+              if (onUpdatePlayerPosition) {
+                onUpdatePlayerPosition(currentDraggedPlayer, { x: openEndX, y: openEndY });
+              }
+              
+              connectedToOpenEnd = true;
+              break;
+            }
+          }
+          
+          // Wenn nicht an offenes Ende gedockt:
+          // - Spieler aus Wartebereich: normal platzieren
+          // - Spieler schon auf Board: Position wird durch handleMouseMove bereits aktualisiert
+          if (!connectedToOpenEnd && player.onBoard === false && onUpdatePlayerPosition) {
+            const clampedX = Math.max(8, Math.min(92, dropX));
+            const clampedY = Math.max(8, Math.min(92, dropY));
+            onUpdatePlayerPosition(currentDraggedPlayer, { x: clampedX, y: clampedY });
+          }
         }
       }
     }
+    
+    // Wenn ein Prozessschritt gezogen wurde
+    if (currentDraggedProcessStep && gameBoardRef.current && onUpdateProcessObject) {
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+      
+      // Prüfe ob über einem Spieler gedroppt
+      const targetPlayer = players.find(player => {
+        if (!player.position || player.onBoard === false) return false;
+        
+        const boardRect = gameBoardRef.current!.getBoundingClientRect();
+        const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+        const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+        
+        const distance = Math.sqrt(
+          Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
+        );
+        
+        return distance < 60;
+      });
+      
+      if (targetPlayer) {
+        // Prozessschritt dem Spieler zuordnen
+        console.log('✅ Verknüpfe Prozessschritt mit Spieler:', targetPlayer.name);
+        onUpdateProcessObject(currentDraggedProcessStep, {
+          inWaitingArea: false,
+          assignedToPlayerId: targetPlayer.id,
+          position: null as any
+        } as Partial<ProcessObject>);
+      } else {
+        // Frei auf dem Spielfeld platzieren
+        const boardRect = gameBoardRef.current.getBoundingClientRect();
+        const x = ((mouseX - boardRect.left) / boardRect.width) * 100;
+        const y = ((mouseY - boardRect.top) / boardRect.height) * 100;
+        const clampedX = Math.max(8, Math.min(92, x));
+        const clampedY = Math.max(8, Math.min(92, y));
+        
+        console.log('✅ Platziere Prozessschritt frei auf Spielfeld:', clampedX, clampedY);
+        onUpdateProcessObject(currentDraggedProcessStep, {
+          inWaitingArea: false,
+          position: { x: clampedX, y: clampedY },
+          assignedToPlayerId: null as any
+        } as Partial<ProcessObject>);
+      }
+    }
+
+    // Wenn ein Spieler gezogen wird, prüfe ob er auf einen freien Prozessschritt fällt
+    if (currentDraggedPlayer && e.button === 0) {
+      const player = players.find(p => p.id === currentDraggedPlayer);
+      if (!player) return;
+
+      // Berechne Drop-Position in Prozent
+      const rect = e.currentTarget.getBoundingClientRect();
+      const dropX = ((e.clientX - rect.left) / rect.width) * 100;
+      const dropY = ((e.clientY - rect.top) / rect.height) * 100;
+
+      // Finde freie Prozessschritte in der Nähe (60px Radius entspricht ~6%)
+      const freeProcessSteps = processObjects.filter(obj => {
+        const step = obj as ProcessStep;
+        return step.category === 'process-step' && 
+               step.position && 
+               !step.assignedToPlayerId;
+      });
+
+      let targetProcessStep = null;
+      let minDistance = Infinity;
+
+      for (const obj of freeProcessSteps) {
+        const step = obj as ProcessStep;
+        if (!step.position) continue;
+
+        const dx = step.position.x - dropX;
+        const dy = step.position.y - dropY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < 6 && distance < minDistance) {
+          minDistance = distance;
+          targetProcessStep = step;
+        }
+      }
+
+      if (targetProcessStep) {
+        // Erstelle Prozess-Karte: vom Prozessschritt zum Spieler
+        console.log('🔗 Verknüpfe freien Prozessschritt mit Spieler', targetProcessStep.name, '→', player.name);
+        
+        // Neue Prozess-Karte erstellen (mit onAddCard, nicht onAddProcessObject)
+        if (onAddCard) {
+          onAddCard(
+            `${targetProcessStep.name} → ${player.name}`,
+            targetProcessStep.id, // fromPlayerId
+            player.id, // toPlayerId
+            '', // medium
+            '', // duration
+            '' // description
+          );
+        }
+      }
+    }
+    
     setDraggedPlayer(null);
+    setDraggedProcessStep(null);
     setDragPreviewPosition(null);
   };
 
@@ -1092,11 +1351,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const getConnections = () => {
-    const connections: Array<{ from: string; to: string; count: number; cards: ProcessCard[] }> = [];
+    const connections: Array<{ from: string; to: string | null; count: number; cards: ProcessCard[] }> = [];
     
     cards.forEach(card => {
+      // Erlaube auch Verbindungen ohne Empfänger (to kann leer sein)
       const existing = connections.find(
-        c => c.from === card.fromPlayerId && c.to === card.toPlayerId
+        c => c.from === card.fromPlayerId && c.to === (card.toPlayerId || null)
       );
       
       if (existing) {
@@ -1105,7 +1365,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
       } else {
         connections.push({
           from: card.fromPlayerId,
-          to: card.toPlayerId,
+          to: card.toPlayerId || null,
           count: 1,
           cards: [card],
         });
@@ -1115,401 +1375,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     return connections;
   };
 
-  // Render Eingabe view - card-by-card navigation through process steps
-  const renderEingabeView = () => {
-    const connections = getConnections();
-    
-    // Flatten all cards and decision boxes in chronological order
-    const processCards = connections.flatMap(conn => conn.cards).map(card => ({ type: 'card' as const, data: card, timestamp: card.timestamp }));
-    const decisions = decisionBoxes.map(box => ({ type: 'decision' as const, data: box, timestamp: Date.now() })); // TODO: add timestamp to decision boxes
-    const allItems = [...processCards, ...decisions].sort((a, b) => a.timestamp - b.timestamp);
-    
-    if (allItems.length === 0) {
-      return (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center">
-            <div className="relative mb-6">
-              <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/30 to-purple-600/30 rounded-3xl blur-2xl"></div>
-              <div className="relative w-32 h-32 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 rounded-3xl flex items-center justify-center mx-auto border-2 border-indigo-500/30">
-                <svg className="w-16 h-16 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-              </div>
-            </div>
-            <h3 className="text-2xl font-bold text-white mb-3">Keine Prozessschritte vorhanden</h3>
-            <p className="text-gray-400 text-lg">Erstelle den ersten Prozessschritt</p>
-            <button
-              onClick={openProcessModalWithAutoSender}
-              className="mt-6 px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl font-semibold transition-all shadow-lg"
-            >
-              + Prozessschritt hinzufügen
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // Ensure currentCardIndex is within bounds
-    const safeIndex = Math.max(0, Math.min(currentCardIndex, allItems.length - 1));
-
-    return (
-      <div className="absolute inset-0 flex items-center justify-center p-8 overflow-hidden">
-        {/* Background decoration */}
-        <div className="absolute inset-0 opacity-5 pointer-events-none">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500 rounded-full blur-3xl"></div>
-          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500 rounded-full blur-3xl"></div>
-        </div>
-
-        {/* Navigation Arrows */}
-        <button
-          onClick={() => setCurrentCardIndex(Math.max(0, safeIndex - 1))}
-          disabled={safeIndex === 0}
-          className={`absolute left-8 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full flex items-center justify-center transition-all z-20 ${
-            safeIndex === 0 
-              ? 'bg-slate-800/30 text-gray-600 cursor-not-allowed' 
-              : 'bg-slate-800/80 hover:bg-slate-700/80 text-white hover:scale-110 shadow-xl'
-          }`}
-        >
-          <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </button>
-
-        <button
-          onClick={() => setCurrentCardIndex(Math.min(allItems.length - 1, safeIndex + 1))}
-          disabled={safeIndex === allItems.length - 1}
-          className={`absolute right-8 top-1/2 -translate-y-1/2 w-16 h-16 rounded-full flex items-center justify-center transition-all z-20 ${
-            safeIndex === allItems.length - 1 
-              ? 'bg-slate-800/30 text-gray-600 cursor-not-allowed' 
-              : 'bg-slate-800/80 hover:bg-slate-700/80 text-white hover:scale-110 shadow-xl'
-          }`}
-        >
-          <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M9 18l6-6-6-6" />
-          </svg>
-        </button>
-
-        {/* Main Card Stack */}
-        <div className="relative max-w-2xl w-full">
-          {/* Progress Indicator */}
-          <div className="mb-6 flex items-center justify-center gap-2">
-            <span className="text-indigo-300 font-semibold text-sm">
-              Schritt {safeIndex + 1} von {allItems.length}
-            </span>
-            <div className="flex gap-1.5 ml-4">
-              {allItems.map((_, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setCurrentCardIndex(idx)}
-                  className={`h-2 rounded-full transition-all ${
-                    idx === safeIndex 
-                      ? 'w-8 bg-gradient-to-r from-indigo-500 to-purple-500' 
-                      : 'w-2 bg-slate-600 hover:bg-slate-500'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Card Fan Container - stark überlappend */}
-          <div className="relative flex justify-center items-center py-8" style={{ minHeight: '100vh' }}>
-            {allItems.map((item, idx) => {
-              const isCurrent = idx === safeIndex;
-              const totalCards = allItems.length;
-              const cardWidth = 650; // Noch größere Karten
-              const overlapAmount = 580; // Starke Überlappung - nur 70px Abstand
-              
-              // Berechne die Position - gerade nebeneinander
-              const xOffset = idx * (cardWidth - overlapAmount) - ((totalCards - 1) * (cardWidth - overlapAmount)) / 2;
-
-              // Determine card or decision
-              const isDecision = item.type === 'decision';
-              const itemKey = isDecision ? item.data.id : item.data.id;
-
-              return (
-                <div
-                  key={itemKey}
-                  className="absolute rounded-3xl shadow-2xl cursor-pointer transition-all duration-300"
-                  style={{
-                    width: `${cardWidth}px`,
-                    height: 'calc(100vh - 180px)',
-                    maxHeight: '900px',
-                    left: '50%',
-                    top: '50%',
-                    transform: `translate(calc(-50% + ${xOffset}px), -50%)`,
-                    zIndex: isCurrent ? 100 : 50 + idx,
-                    boxShadow: isCurrent 
-                      ? '0 30px 100px rgba(0, 0, 0, 0.8), 0 0 80px rgba(99, 102, 241, 0.5)' 
-                      : '0 15px 40px rgba(0, 0, 0, 0.6)'
-                  }}
-                  onClick={() => {
-                    setCurrentCardIndex(idx);
-                  }}
-                >
-                  {/* Kartenrückseite - umgedeckt */}
-                  {!isCurrent && (
-                    <div className={`absolute inset-0 rounded-3xl overflow-hidden border-4 shadow-inner ${
-                      isDecision 
-                        ? 'bg-gradient-to-br from-amber-500 via-orange-500 to-yellow-600 border-amber-400/60'
-                        : 'bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 border-indigo-400/60'
-                    }`}>
-                      <div className="absolute inset-0 opacity-20" style={{
-                        backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 15px, rgba(255,255,255,.08) 15px, rgba(255,255,255,.08) 30px)',
-                      }}></div>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="text-white/30 font-bold" style={{ fontSize: '14rem' }}>
-                          {isDecision ? '🔀' : '?'}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Karteninhalt - aufgedeckt */}
-                  {isCurrent && isDecision && (() => {
-                    const decisionBox = item.data;
-                    const fromPlayer = players.find(p => p.id === decisionBox.fromPlayerId);
-                    if (!fromPlayer) return null;
-
-                    return (
-                      <div className="absolute inset-0 bg-gradient-to-br from-slate-800/95 via-slate-900 to-slate-800/95 rounded-3xl overflow-hidden border-4 border-amber-500/80">
-                        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-orange-500/5 pointer-events-none"></div>
-                        <div className="relative p-10 h-full flex flex-col">
-                          {/* Card Header */}
-                          <div className="mb-8 text-center flex-shrink-0">
-                            <div className="inline-block px-6 py-3 bg-gradient-to-r from-amber-500/30 to-orange-500/30 rounded-2xl border-2 border-amber-500/40 shadow-lg">
-                              <span className="text-base font-bold text-amber-200 tracking-wider">ENTSCHEIDUNGSPUNKT</span>
-                            </div>
-                          </div>
-
-                          {/* From Player */}
-                          <div className="mb-8 relative flex-shrink-0">
-                            <div className="absolute -left-8 -top-3 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-2xl border-3 border-slate-900 z-10"
-                              style={{ 
-                                backgroundColor: fromPlayer.color,
-                                boxShadow: `0 12px 30px ${fromPlayer.color}60`
-                              }}
-                            >
-                              {fromPlayer.icon}
-                            </div>
-                            <div 
-                              className="ml-12 pl-6 py-3 rounded-2xl border-l-4"
-                              style={{ 
-                                borderColor: fromPlayer.color,
-                                backgroundColor: fromPlayer.color + '18'
-                              }}
-                            >
-                              <div className="text-xs text-gray-400 font-bold tracking-widest mb-1">ENTSCHEIDUNG VON</div>
-                              <div className="font-bold text-white text-lg">{fromPlayer.name}</div>
-                              <div className="text-xs text-gray-400 italic">{fromPlayer.role}</div>
-                            </div>
-                          </div>
-
-                          {/* Decision Question */}
-                          <div className="my-4 relative flex-1 flex items-center">
-                            <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-2xl blur"></div>
-                            <div className="relative bg-gradient-to-br from-slate-700/60 to-slate-800/60 rounded-2xl p-5 border-2 border-amber-400/30 w-full">
-                              <div className="flex items-start gap-4 mb-4">
-                                <div className="text-4xl">❓</div>
-                                <div className="flex-1">
-                                  <div className="text-lg text-white leading-relaxed font-medium">
-                                    {decisionBox.question}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="mt-4 pt-4 border-t border-white/10">
-                                <div className="text-xs text-gray-400 font-bold tracking-widest mb-3">OPTIONEN</div>
-                                <div className="space-y-2">
-                                  {decisionBox.options.map((option, idx) => {
-                                    const toPlayer = players.find(p => p.id === option.toPlayerId);
-                                    if (!toPlayer) return null;
-                                    return (
-                                      <div key={idx} className="flex items-center gap-3 bg-slate-800/40 p-3 rounded-lg border border-white/10">
-                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-lg" style={{ backgroundColor: toPlayer.color }}>
-                                          {toPlayer.icon}
-                                        </div>
-                                        <div className="flex-1">
-                                          <div className="text-sm font-semibold text-white">{option.label}</div>
-                                          {option.description && (
-                                            <div className="text-xs text-gray-400 mt-0.5">{option.description}</div>
-                                          )}
-                                        </div>
-                                        <div className="text-xs text-gray-500">→ {toPlayer.name}</div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  
-                  {/* Process Card Content */}
-                  {isCurrent && !isDecision && (() => {
-                    const card = item.data;
-                    const cardFromPlayer = players.find(p => p.id === card.fromPlayerId);
-                    const cardToPlayer = players.find(p => p.id === card.toPlayerId);
-                    
-                    if (!cardFromPlayer || !cardToPlayer) return null;
-
-                    return (
-                    <div className="absolute inset-0 bg-gradient-to-br from-slate-800/95 via-slate-900 to-slate-800/95 rounded-3xl overflow-hidden border-4 border-indigo-500/80">
-                      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 via-transparent to-purple-500/5 pointer-events-none"></div>
-                      <div className="relative p-10 h-full flex flex-col">
-                        {/* Card Header */}
-                        <div className="mb-8 text-center flex-shrink-0">
-                          <div className="inline-block px-6 py-3 bg-gradient-to-r from-indigo-500/30 to-purple-500/30 rounded-2xl border-2 border-indigo-500/40 shadow-lg">
-                            <span className="text-base font-bold text-indigo-200 tracking-wider">PROZESSSCHRITT</span>
-                          </div>
-                        </div>
-
-                        {/* From Player */}
-                        <div className="mb-8 relative flex-shrink-0">
-                          <div className="absolute -left-8 -top-4 w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-2xl border-4 border-slate-900 z-10"
-                            style={{ 
-                              backgroundColor: cardFromPlayer.color,
-                              boxShadow: `0 12px 30px ${cardFromPlayer.color}60`
-                            }}
-                          >
-                            {cardFromPlayer.icon}
-                          </div>
-                          <div 
-                            className="ml-16 pl-8 py-4 rounded-2xl border-l-4"
-                            style={{ 
-                              borderColor: cardFromPlayer.color,
-                              backgroundColor: cardFromPlayer.color + '18'
-                            }}
-                          >
-                            <div className="text-xs text-gray-400 font-bold tracking-widest mb-1">VON</div>
-                            <div className="font-bold text-white text-xl">{cardFromPlayer.name}</div>
-                            <div className="text-sm text-gray-400 italic">{cardFromPlayer.role}</div>
-                          </div>
-                        </div>
-
-                        {/* Process Description */}
-                        <div className="my-8 relative flex-1 flex items-center">
-                          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-2xl blur"></div>
-                          <div className="relative bg-gradient-to-br from-slate-700/60 to-slate-800/60 rounded-2xl p-8 border-2 border-indigo-400/30 w-full">
-                            <div className="text-xl text-white leading-relaxed font-medium">
-                              {card.text}
-                            </div>
-                            {card.description && (
-                              <div className="mt-4 text-base text-gray-400 italic">
-                                {card.description}
-                              </div>
-                            )}
-                            <div className="mt-5 flex items-center gap-4">
-                              {card.medium && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-gray-500 font-semibold">Medium:</span>
-                                  <span className="px-4 py-1.5 bg-indigo-500/25 border border-indigo-500/40 rounded-lg text-sm text-indigo-300 font-semibold">
-                                    {card.medium}
-                                  </span>
-                                </div>
-                              )}
-                              {card.duration && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-gray-500 font-semibold">Dauer:</span>
-                                  <span className="px-4 py-1.5 bg-purple-500/25 border border-purple-500/40 rounded-lg text-sm text-purple-300 font-semibold">
-                                    {card.duration}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Arrow Indicator */}
-                        <div className="flex justify-center my-6 flex-shrink-0">
-                          <div className="relative">
-                            <div className="absolute inset-0 bg-gradient-to-b from-indigo-500 to-purple-500 rounded-full blur-xl opacity-60"></div>
-                            <div className="relative w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center shadow-lg">
-                              <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                <path d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                              </svg>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* To Player */}
-                        <div className="relative mb-8 flex-shrink-0">
-                          <div className="absolute -right-8 -top-4 w-20 h-20 rounded-2xl flex items-center justify-center text-4xl shadow-2xl border-4 border-slate-900 z-10"
-                            style={{ 
-                              backgroundColor: cardToPlayer.color,
-                              boxShadow: `0 12px 30px ${cardToPlayer.color}60`
-                            }}
-                          >
-                            {cardToPlayer.icon}
-                          </div>
-                          <div 
-                            className="mr-16 pr-8 py-4 rounded-2xl border-r-4"
-                            style={{ 
-                              borderColor: cardToPlayer.color,
-                              backgroundColor: cardToPlayer.color + '18'
-                            }}
-                          >
-                            <div className="text-xs text-gray-400 font-bold tracking-widest mb-1 text-right">AN</div>
-                            <div className="font-bold text-white text-xl text-right">{cardToPlayer.name}</div>
-                            <div className="text-sm text-gray-400 italic text-right">{cardToPlayer.role}</div>
-                          </div>
-                        </div>
-
-                        {/* Action Buttons - only on current card */}
-                        {isCurrent && (
-                          <div className="mt-6 pt-6 border-t-2 border-white/10 space-y-3 flex-shrink-0">
-                            <div className="flex gap-3">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (onUpdateCard) {
-                                    const newText = prompt('Schritt bearbeiten:', card.text);
-                                    if (newText && newText !== card.text) {
-                                      onUpdateCard(card.id, { text: newText });
-                                    }
-                                  }
-                                }}
-                                className="flex-1 px-5 py-3 bg-slate-700/50 hover:bg-slate-600/50 text-white rounded-xl transition-all border border-white/10 font-semibold text-base"
-                              >
-                                ✏️ Bearbeiten
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedFromPlayer(card.toPlayerId);
-                                  setSelectedToPlayer(null);
-                                  setShowProcessModal(true);
-                                }}
-                                className="flex-1 px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl transition-all font-semibold shadow-lg text-base"
-                              >
-                                + Neuer Schritt
-                              </button>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowDecisionModal(true);
-                                setDecisionStarter(card.toPlayerId);
-                              }}
-                              className="w-full px-5 py-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-xl transition-all font-semibold shadow-lg text-base"
-                            >
-                              🔀 Entscheidung hinzufügen
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    );
-                  })()}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // Render swimlane view with horizontal lanes
 
   // Render swimlane view with horizontal lanes
   const renderSwimlaneView = () => {
@@ -1545,7 +1411,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
         playerId: conn.from,
         cards: conn.cards,
         fromId: conn.from,
-        toId: conn.to,
+        toId: conn.to || undefined,
         timestamp: conn.cards[0].timestamp,
         stepNumber: index + 1
       });
@@ -2110,101 +1976,132 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 overflow-hidden">
-      {/* Professional Header */}
+      {/* Simplified Header */}
       <header className="bg-slate-800/50 backdrop-blur-xl border-b border-white/10 shadow-2xl flex-shrink-0 relative z-50">
-        <div className="max-w-full mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-full mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Users className="w-7 h-7 text-white" />
+            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+              <Users className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white">Processorix</h1>
-              <p className="text-sm text-indigo-300">Kollaboratives Prozess-Mapping</p>
+              <h1 className="text-xl font-bold text-white">Processorix</h1>
             </div>
           </div>
 
           {/* Right side buttons */}
-          <div className="flex items-center gap-3">
-            {/* View Mode Toggle Button */}
-            <button
-              onClick={() => {
-                if (viewMode === 'player-centric') setViewMode('eingabe');
-                else if (viewMode === 'eingabe') setViewMode('swimlane');
-                else setViewMode('player-centric');
-              }}
-              className="flex items-center gap-2 px-4 py-3 bg-slate-700/50 hover:bg-slate-600/50 text-white rounded-xl transition-all border border-white/10"
-              title={
-                viewMode === 'player-centric' ? 'Zu Eingabe-Ansicht wechseln' :
-                viewMode === 'eingabe' ? 'Zu Swimlane-Ansicht wechseln' :
-                'Zu Spieleransicht wechseln'
-              }
-            >
-              {viewMode === 'player-centric' ? (
+          <div className="flex items-center gap-2">
+            {/* Verwaltung Button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowManagementMenu(!showManagementMenu)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all border text-sm font-medium bg-slate-700/50 hover:bg-slate-600/50 border-white/10 text-white"
+              >
+                <Settings className="w-4 h-4" />
+                <span>Verwaltung</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${showManagementMenu ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {showManagementMenu && (
                 <>
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
-                  <span className="hidden sm:inline">Eingabe</span>
-                </>
-              ) : viewMode === 'eingabe' ? (
-                <>
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="2" y="4" width="20" height="4" rx="1" />
-                    <rect x="2" y="10" width="20" height="4" rx="1" />
-                    <rect x="2" y="16" width="20" height="4" rx="1" />
-                  </svg>
-                  <span className="hidden sm:inline">Swimlane</span>
-                </>
-              ) : (
-                <>
-                  <LayoutGrid className="w-5 h-5" />
-                  <span className="hidden sm:inline">Spieleransicht</span>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setShowManagementMenu(false)}
+                  />
+                  <div className="absolute top-full right-0 mt-2 w-80 bg-slate-800 rounded-xl shadow-2xl border border-white/20 p-4 z-50">
+                    <h3 className="text-white font-semibold mb-3">Spiel speichern</h3>
+                    
+                    <input
+                      type="text"
+                      value={saveName}
+                      onChange={(e) => setSaveName(e.target.value)}
+                      placeholder="Name eingeben..."
+                      className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-white/10 focus:border-blue-400 focus:outline-none mb-3"
+                    />
+                    
+                    {saveMessage && (
+                      <div className="mb-3 px-3 py-2 bg-green-500/20 text-green-300 rounded-lg text-sm">
+                        {saveMessage}
+                      </div>
+                    )}
+                    
+                    <button
+                      onClick={() => {
+                        if (saveName.trim()) {
+                          // TODO: Später tatsächlich speichern
+                          setSaveMessage('Spiel gespeichert');
+                          setTimeout(() => {
+                            setSaveMessage('');
+                            setSaveName('');
+                            setShowManagementMenu(false);
+                          }, 2000);
+                        }
+                      }}
+                      disabled={!saveName.trim()}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                    >
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                      </svg>
+                      Speichern
+                    </button>
+                  </div>
                 </>
               )}
+            </div>
+
+            {/* Ansichtsansicht Button */}
+            <button
+              onClick={() => {
+                if (viewMode === 'swimlane') setViewMode('player-centric');
+                else setViewMode('swimlane');
+              }}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all border text-sm font-medium ${
+                viewMode === 'swimlane' 
+                  ? 'bg-indigo-500/30 border-indigo-400/50 text-indigo-200' 
+                  : 'bg-slate-700/50 hover:bg-slate-600/50 border-white/10 text-white'
+              }`}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="4" width="20" height="4" rx="1" />
+                <rect x="2" y="10" width="20" height="4" rx="1" />
+                <rect x="2" y="16" width="20" height="4" rx="1" />
+              </svg>
+              <span>Ansichtsansicht</span>
             </button>
-            
-            {/* Switch to Player View Button */}
-            {onSwitchToPlayerView && (
-              <button
-                onClick={onSwitchToPlayerView}
-                className="flex items-center gap-2 px-4 py-3 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-xl transition-all border border-purple-500/30"
-              >
-                <User className="w-5 h-5" />
-                <span className="hidden sm:inline">Spieleransicht</span>
-              </button>
-            )}
             
             {/* Ergebnisse Button */}
             <button
               onClick={() => setShowResultsModal(true)}
-              className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl transition-all shadow-lg font-semibold"
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-xl transition-all border border-emerald-500/30 text-sm font-medium"
             >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
               </svg>
-              <span className="hidden sm:inline">Ergebnisse</span>
+              <span>Ergebnisse</span>
             </button>
             
             {/* Share Button */}
             {gameId && (
               <button
                 onClick={() => setShowShareModal(true)}
-                className="flex items-center gap-2 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-all shadow-lg font-semibold"
+                className="flex items-center gap-2 px-4 py-2.5 bg-slate-700/50 hover:bg-slate-600/50 text-white rounded-xl transition-all border border-white/10 text-sm font-medium"
               >
-                <Share2 className="w-5 h-5" />
-                <span className="hidden sm:inline">Teilen</span>
+                <Share2 className="w-4 h-4" />
+                <span>Teilen</span>
               </button>
             )}
 
-            {/* Plus Button mit Dropdown */}
+            {/* Hinzufügen Dropdown */}
             <div className="relative">
             <button
               onClick={() => setShowDropdown(!showDropdown)}
-              className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl hover:from-indigo-600 hover:to-purple-700 transition-all shadow-lg font-semibold relative z-[300]"
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl hover:from-indigo-600 hover:to-purple-700 transition-all shadow-lg font-medium relative z-[300] text-sm"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4" />
               Hinzufügen
-              <ChevronDown className={`w-4 h-4 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3 h-3 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
             </button>
 
             {/* Dropdown Menu */}
@@ -2308,8 +2205,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
       {/* Main Content */}
       <main 
         className="flex-1 flex flex-col gap-4 p-4 overflow-hidden"
-        onMouseMove={draggedPlayer ? handleMouseMove : undefined}
-        onMouseUp={draggedPlayer ? handleMouseUp : undefined}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
       >
         {/* Communication Object Selection Banner */}
         {selectedCommObject && (
@@ -2412,7 +2309,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
             className={`${inspectedPlayer || inspectedProcessStep || inspectedDecisionBox || selectedObjectDetail ? 'flex-[2]' : 'flex-1'} bg-gradient-to-br from-slate-700/40 via-indigo-800/30 to-slate-700/40 backdrop-blur-sm rounded-3xl shadow-2xl border-2 ${isConnectorMode ? 'border-purple-400/50' : 'border-indigo-400/30'} p-8 relative overflow-hidden transition-all duration-300`}
             onMouseMove={handleDragConnectionMove}
             onMouseUp={(e) => {
-              console.log('📋 Board mouseUp', { isDraggingConnection });
+              console.log('📋 Board mouseUp', { isDraggingConnection, draggedPlayer });
+              
+              // Handle connection dragging
               if (isDraggingConnection) {
                 // Check if we're over a player by finding the element at mouse position
                 const elements = document.elementsFromPoint(e.clientX, e.clientY);
@@ -2420,15 +2319,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 const targetPlayerId = playerElement?.getAttribute('data-player-id');
                 
                 console.log('🔍 Found player at mouse position:', targetPlayerId);
-                handleEndDragConnection(e, targetPlayerId || undefined);
+                handleEndDragConnection(targetPlayerId || undefined);
+                return; // Don't continue to other logic
               }
+              
+              // Always call handleMouseUp for player/process step dragging
+              handleMouseUp(e);
             }}
           >
           
           {/* Render based on viewMode */}
-          {viewMode === 'eingabe' ? (
-            renderEingabeView()
-          ) : viewMode === 'swimlane' ? (
+          {viewMode === 'swimlane' ? (
             renderSwimlaneView()
           ) : (
             <>
@@ -2484,6 +2385,82 @@ const GameBoard: React.FC<GameBoardProps> = ({
             {/* Draw connections */}
             {getConnections().map((conn) => {
               const fromPlayer = players.find(p => p.id === conn.from);
+              
+              if (!fromPlayer) return null;
+              
+              const fromPlayerIndex = players.indexOf(fromPlayer);
+              const fromPlayerPos = getPlayerPosition(fromPlayer, fromPlayerIndex, players.length);
+              
+              // Wenn kein Empfänger: zeichne Linie ins Leere (gleicher Stil wie normale Verbindung)
+              if (!conn.to) {
+                // Verwende gespeicherte Position falls vorhanden, sonst default 20% nach rechts
+                const firstCard = conn.cards[0];
+                const toPos = firstCard.openEndPosition 
+                  ? firstCard.openEndPosition 
+                  : { x: fromPlayerPos.x + 20, y: fromPlayerPos.y };
+                
+                const startPort = getPlayerPortPosition(fromPlayerPos, toPos, true);
+                const endPort = { x: toPos.x, y: toPos.y };
+                
+                // Gleiche Kurven-Berechnung wie bei normalen Verbindungen
+                const { controlX, controlY } = calculateCurveControlPoint(
+                  fromPlayerPos,
+                  toPos,
+                  conn.from,
+                  'open-end'
+                );
+                
+                const path = `M ${startPort.x} ${startPort.y} Q ${controlX} ${controlY} ${endPort.x} ${endPort.y}`;
+                const isSelected = selectedConnection?.from === conn.from && !selectedConnection?.to;
+                const isHovered = hoveredConnection?.from === conn.from && !hoveredConnection?.to;
+                
+                return (
+                  <g key={`${conn.from}-open`} style={{ pointerEvents: 'auto' }}>
+                    {/* Invisible wider path for easier clicking */}
+                    <path
+                      d={path}
+                      stroke="transparent"
+                      strokeWidth="20"
+                      fill="none"
+                      style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedConnectionDetail({ 
+                          from: conn.from, 
+                          to: undefined,
+                          x: e.clientX,
+                          y: e.clientY
+                        });
+                      }}
+                      onMouseEnter={() => setHoveredConnection({ from: conn.from, to: undefined })}
+                      onMouseLeave={() => setHoveredConnection(null)}
+                    />
+                    
+                    {/* Main connection line */}
+                    <path
+                      d={path}
+                      stroke={fromPlayer.color}
+                      strokeWidth={isSelected ? "1.2" : isHovered ? "1.0" : "0.6"}
+                      fill="none"
+                      opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                    
+                    {/* Offener Kreis am Ende statt Pfeil */}
+                    <circle
+                      cx={endPort.x}
+                      cy={endPort.y}
+                      r="1.5"
+                      fill="none"
+                      stroke={fromPlayer.color}
+                      strokeWidth="0.4"
+                      opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  </g>
+                );
+              }
+              
               const toPlayer = players.find(p => p.id === conn.to);
               
               if (!fromPlayer || !toPlayer) return null;
@@ -2548,7 +2525,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         // Normaler Click: Zeige Details
                         setSelectedConnectionDetail({ 
                           from: conn.from, 
-                          to: conn.to,
+                          to: conn.to || undefined,
                           x: e.clientX,
                           y: e.clientY
                         });
@@ -2556,7 +2533,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     }}
                     onMouseEnter={() => {
                       console.log('Connection hover START');
-                      setHoveredConnection({ from: conn.from, to: conn.to });
+                      setHoveredConnection({ from: conn.from, to: conn.to || undefined });
                     }}
                     onMouseLeave={() => {
                       console.log('Connection hover END');
@@ -2715,7 +2692,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               fromPos,
               toPos,
               conn.from,
-              conn.to
+              conn.to || 'open-end'
             );
             
             const firstCard = conn.cards[0];
@@ -2944,6 +2921,41 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 </div>
               );
             })()}
+
+            {/* Drag Preview für Prozessschritte aus Wartebereich */}
+            {draggedProcessStep && dragPreviewPosition && (() => {
+              const step = processObjects.find(obj => obj.id === draggedProcessStep);
+              if (!step || step.category !== 'process-step') return null;
+              
+              return (
+                <div
+                  key={`preview-${step.id}`}
+                  className="absolute"
+                  style={{
+                    left: `${dragPreviewPosition.x}%`,
+                    top: `${dragPreviewPosition.y}%`,
+                    transform: 'translate(-50%, -50%)',
+                    opacity: 0.7,
+                    pointerEvents: 'none',
+                    zIndex: 100,
+                  }}
+                >
+                  <div className="bg-teal-500/90 backdrop-blur rounded-lg p-3 shadow-lg border border-teal-400/50 w-40">
+                    <div className="font-bold text-white text-sm mb-1">{step.name}</div>
+                    {step.input && (
+                      <div className="text-xs text-teal-100 mb-1">
+                        📥 {step.input}
+                      </div>
+                    )}
+                    {step.output && (
+                      <div className="text-xs text-teal-100">
+                        📤 {step.output}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
             
             {players.filter(p => p.onBoard !== false).map((player, index) => {
               const onBoardPlayers = players.filter(p => p.onBoard !== false);
@@ -2992,9 +3004,10 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     style={{ pointerEvents: 'auto', cursor: isDragging ? 'grabbing' : ((isConnectorMode || isDecisionMode) ? 'pointer' : 'grab') }}
                   >
                     {/* Spielfigur mit 3D-Effekt */}
-                    <div className="relative">
+                    <div className="relative" data-player-id={player.id}>
                       {/* Hauptkörper der Spielfigur */}
                       <div
+                        data-player-id={player.id}
                         className="w-24 h-24 rounded-full flex items-center justify-center text-4xl relative overflow-hidden"
                         style={{
                           backgroundColor: player.color,
@@ -3018,7 +3031,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         />
                         
                         {/* Icon mit leichtem Schatten */}
-                        <div className="relative z-10 drop-shadow-lg" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }}>
+                        <div className="relative z-10 drop-shadow-lg" data-player-id={player.id} style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }}>
                           {player.icon}
                         </div>
                       </div>
@@ -3067,15 +3080,38 @@ const GameBoard: React.FC<GameBoardProps> = ({
                               <h3 className="font-bold text-white text-lg">{player.name}</h3>
                               <p className="text-sm text-gray-400">{player.role}</p>
                             </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedPlayerDetail(null);
-                              }}
-                              className="p-1 hover:bg-white/10 rounded transition-colors"
-                            >
-                              <X className="w-4 h-4 text-gray-400" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const copiedPlayer: Player = {
+                                    ...player,
+                                    id: `player-${Date.now()}`,
+                                    name: `${player.name} (Kopie)`,
+                                    onBoard: player.onBoard,
+                                    position: player.position ? {
+                                      x: player.position.x + 5,
+                                      y: player.position.y + 5
+                                    } : undefined,
+                                  };
+                                  onAddPlayer(copiedPlayer);
+                                  setSelectedPlayerDetail(null);
+                                }}
+                                className="p-2 hover:bg-green-500/20 rounded transition-colors group"
+                                title="Spieler kopieren"
+                              >
+                                <Copy className="w-4 h-4 text-gray-400 group-hover:text-green-400" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedPlayerDetail(null);
+                                }}
+                                className="p-1 hover:bg-white/10 rounded transition-colors"
+                              >
+                                <X className="w-4 h-4 text-gray-400" />
+                              </button>
+                            </div>
                           </div>
 
                           {/* Info sections */}
@@ -3116,7 +3152,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             )}
                           </div>
 
-                          {/* Inspect Button */}
+                          {/* Buttons */}
                           <div className="mt-3 pt-3 border-t border-white/10">
                             <button
                               onClick={(e) => {
@@ -3207,10 +3243,121 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         </div>
                       </div>
                     )}
+
+                    {/* Verknüpfte Prozessschritte beim Spieler */}
+                    {(() => {
+                      const linkedSteps = processObjects.filter(
+                        obj => obj.category === 'process-step' && obj.assignedToPlayerId === player.id
+                      );
+                      if (linkedSteps.length === 0) return null;
+
+                      return (
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 flex flex-col gap-2">
+                          {linkedSteps.map((obj) => {
+                            const step = obj as ProcessStep;
+                            return (
+                            <div
+                              key={step.id}
+                              className="bg-teal-500/90 backdrop-blur rounded-lg p-2 shadow-lg border border-teal-400/50 w-40 cursor-move"
+                              style={{ zIndex: 10 }}
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                setDraggedProcessStep(step.id);
+                              }}
+                            >
+                              <div className="font-bold text-white text-xs mb-1">{step.name}</div>
+                              {step.input && (
+                                <div className="text-[10px] text-teal-100 mb-0.5">
+                                  📥 {step.input}
+                                </div>
+                              )}
+                              {step.output && (
+                                <div className="text-[10px] text-teal-100">
+                                  📤 {step.output}
+                                </div>
+                              )}
+                              {step.duration && (
+                                <div className="text-[10px] text-teal-100 mt-1">
+                                  ⏱️ {step.duration}
+                                </div>
+                              )}
+                            </div>
+                          );})}
+                        </div>
+                      );
+                    })()}
+
+
                   </div>
                 </div>
               );
             })}
+
+            {/* Platzierte Prozessschritte auf dem Spielfeld */}
+            {processObjects
+              .filter(obj => obj.category === 'process-step' && obj.position && !obj.inWaitingArea && !obj.assignedToPlayerId)
+              .map((obj) => {
+                const step = obj as ProcessStep;
+                const isDragging = draggedProcessStep === step.id;
+                
+                return (
+                  <div
+                    key={`placed-step-${step.id}`}
+                    className="absolute cursor-move group"
+                    style={{
+                      left: `${step.position!.x}%`,
+                      top: `${step.position!.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      pointerEvents: 'auto',
+                      zIndex: isDragging ? 50 : 30,
+                      opacity: isDragging ? 0.5 : 1,
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      setDraggedProcessStep(step.id);
+                      setDragPreviewPosition({ x: step.position!.x, y: step.position!.y });
+                    }}
+                  >
+                    <div className="bg-teal-500/90 backdrop-blur rounded-lg p-3 shadow-xl border-2 border-teal-400/50 w-48 transition-all group-hover:scale-105">
+                      <div className="font-bold text-white text-sm mb-2">{step.name}</div>
+                      {step.input && (
+                        <div className="text-xs text-teal-100 mb-1.5 flex items-start gap-1">
+                          <span className="flex-shrink-0">📥</span>
+                          <span>{step.input}</span>
+                        </div>
+                      )}
+                      {step.output && (
+                        <div className="text-xs text-teal-100 mb-1.5 flex items-start gap-1">
+                          <span className="flex-shrink-0">📤</span>
+                          <span>{step.output}</span>
+                        </div>
+                      )}
+                      {step.duration && (
+                        <div className="text-xs text-teal-100 flex items-center gap-1">
+                          <span>⏱️</span>
+                          <span>{step.duration}</span>
+                        </div>
+                      )}
+                    </div>
+                    {/* Remove button */}
+                    <button
+                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onUpdateProcessObject) {
+                          onUpdateProcessObject(step.id, {
+                            inWaitingArea: true,
+                            position: undefined
+                          } as Partial<ProcessObject>);
+                        }
+                      }}
+                      style={{ pointerEvents: 'auto' }}
+                    >
+                      <span className="text-white text-sm font-bold">×</span>
+                    </button>
+                  </div>
+                );
+              })}
 
             {/* Placed Communication Objects */}
             {placedCommObjects.map((placed, idx) => {
@@ -4199,8 +4346,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       const isDragging = draggedPlayer === player.id;
                       const isInspected = inspectedPlayer === player.id;
                       
-                      // Während des Draggings den Spieler im Wartebereich ausblenden
-                      if (isDragging) return null;
+                      // Während des Draggings den Spieler im Wartebereich transparent machen statt verstecken
+                      // if (isDragging) return null;
                       
                       return (
                         <div
@@ -4222,6 +4369,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                                   : 'bg-slate-700/80 text-gray-300 hover:bg-slate-600'
                               }`}
                               title={isInspected ? 'Inspektion schließen' : 'Spieler inspizieren'}
+                              style={{ pointerEvents: 'auto' }}
                             >
                               <User className="w-3 h-3" />
                             </button>
@@ -4231,8 +4379,13 @@ const GameBoard: React.FC<GameBoardProps> = ({
                                 backgroundColor: player.color,
                                 boxShadow: '0 4px 12px rgba(0,0,0,0.3), inset 0 -2px 6px rgba(0,0,0,0.15), inset 0 1px 6px rgba(255,255,255,0.2)',
                                 cursor: 'grab',
+                                pointerEvents: 'auto',
                               }}
-                              onMouseDown={(e) => handleMouseDown(e, player.id)}
+                              onClick={() => console.log('🖱️ onClick:', player.name)}
+                              onMouseDown={(e) => {
+                                console.log('🎯 Player mouseDown in waiting area:', player.name);
+                                handleMouseDown(e, player.id);
+                              }}
                             >
                               {player.icon}
                             </div>
@@ -4257,6 +4410,58 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     Keine neuen Spieler im Wartebereich
                   </div>
                 )}
+                
+                {/* Prozessschritte in der gleichen Wartebox */}
+                {(() => {
+                  const waitingSteps = processObjects.filter(obj => obj.category === 'process-step' && obj.inWaitingArea);
+                  console.log('All process objects:', processObjects);
+                  console.log('Waiting steps:', waitingSteps);
+                  return waitingSteps.length > 0 && (
+                    <>
+                      <div className="border-t border-white/10 my-4"></div>
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-teal-500/20 rounded-lg flex items-center justify-center">
+                          <svg className="w-6 h-6 text-teal-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                          </svg>
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-white flex items-center gap-2">
+                            Prozessschritte
+                            <span className="text-xs font-normal text-teal-400 bg-teal-500/20 px-2 py-0.5 rounded-full">
+                              {waitingSteps.length}
+                            </span>
+                          </h3>
+                          <p className="text-sm text-gray-400">Wartebox</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-4 overflow-x-auto pb-2">
+                        {waitingSteps.map((step) => {
+                          const processStep = step as ProcessStep;
+                          const isDragging = draggedProcessStep === step.id;
+                          
+                          if (isDragging) return null;
+                          
+                          return (
+                            <div
+                              key={step.id}
+                              className="flex-shrink-0 bg-gradient-to-br from-teal-600/80 to-teal-800/80 rounded-lg p-3 border border-teal-400/30 hover:border-teal-400/50 transition-all hover:scale-105 cursor-grab active:cursor-grabbing min-w-[120px]"
+                              onMouseDown={(e) => handleProcessStepMouseDown(e, step.id)}
+                            >
+                              <div className="text-white">
+                                <div className="text-2xl mb-1">{step.icon}</div>
+                                <div className="text-xs font-semibold mb-1 line-clamp-2">{step.name}</div>
+                                {processStep.duration && (
+                                  <div className="text-[10px] text-teal-200 opacity-80">⏱ {processStep.duration}</div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Objektbox - nimmt immer 1 Spalte */}
@@ -4272,6 +4477,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   selectedObjectId={selectedCommObject?.id || selectedProcessObject?.id}
                   players={players}
                   onAddCard={onAddCard}
+                  onAddPlayer={onAddPlayer}
                 />
               </div>
             </div>
@@ -4867,12 +5073,32 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         <div className="text-xs text-yellow-300">{option.label}</div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setSelectedConnectionDetail(null)}
-                      className="p-1 hover:bg-white/10 rounded transition-colors"
-                    >
-                      <X className="w-4 h-4 text-gray-400" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {onRemoveCard && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const cardsToDelete = cards.filter(
+                              c => c.fromPlayerId === selectedConnectionDetail.from && 
+                                   c.toPlayerId === selectedConnectionDetail.to &&
+                                   (c as any).decisionBoxId === decisionBox.id
+                            );
+                            cardsToDelete.forEach(card => onRemoveCard(card.id));
+                            setSelectedConnectionDetail(null);
+                          }}
+                          className="p-2 hover:bg-red-500/20 rounded transition-colors group"
+                          title="Pfad löschen"
+                        >
+                          <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-400" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setSelectedConnectionDetail(null)}
+                        className="p-1 hover:bg-white/10 rounded transition-colors"
+                      >
+                        <X className="w-4 h-4 text-gray-400" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Question */}
@@ -4936,6 +5162,111 @@ const GameBoard: React.FC<GameBoardProps> = ({
           );
         }
         
+        // Handle open-ended connection (no receiver yet)
+        if (!selectedConnectionDetail.to) {
+          const openCards = cards.filter(c => c.fromPlayerId === selectedConnectionDetail.from && !c.toPlayerId);
+          if (openCards.length === 0) return null;
+          
+          const fromPlayer = players.find(p => p.id === selectedConnectionDetail.from);
+          if (!fromPlayer) return null;
+          
+          return (
+            <div 
+              className="fixed inset-0 z-[110]" 
+              onClick={() => setSelectedConnectionDetail(null)}
+            >
+              <div 
+                className="absolute bg-slate-800/95 backdrop-blur-xl rounded-xl shadow-2xl border border-orange-400/30 w-96 overflow-hidden flex flex-col"
+                style={{
+                  left: `${selectedConnectionDetail.x}px`,
+                  top: `${selectedConnectionDetail.y}px`,
+                  transform: 'translate(10px, -50%)'
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-4">
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-3 pb-3 border-b border-white/10">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shadow-lg"
+                          style={{ backgroundColor: fromPlayer.color }}
+                        >
+                          {fromPlayer.icon}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-white text-sm">{fromPlayer.name}</div>
+                          <div className="text-xs text-orange-300">Offener Prozessschritt</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {onRemoveCard && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCards.forEach(card => onRemoveCard(card.id));
+                            setSelectedConnectionDetail(null);
+                          }}
+                          className="p-2 hover:bg-red-500/20 rounded transition-colors group"
+                          title="Prozessschritt löschen"
+                        >
+                          <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-400" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setSelectedConnectionDetail(null)}
+                        className="p-1 hover:bg-white/10 rounded transition-colors"
+                      >
+                        <X className="w-4 h-4 text-gray-400" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div className="bg-orange-500/10 rounded-lg p-3 border border-orange-500/20 mb-3">
+                    <div className="text-xs text-orange-300 mb-1">Status</div>
+                    <div className="text-white text-sm">Wartet auf Empfänger</div>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="bg-indigo-500/10 rounded-lg p-3 border border-indigo-500/20 mb-3">
+                    <div className="text-xs text-indigo-300 mb-1">Anzahl Schritte</div>
+                    <div className="text-2xl font-bold text-white">{openCards.length}</div>
+                  </div>
+
+                  {/* Preview of steps */}
+                  <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                    {openCards.slice(0, 3).map((card, index) => (
+                      <div
+                        key={card.id}
+                        className="bg-slate-700/50 rounded-lg p-3 border border-white/10 text-sm"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <div
+                            className="w-6 h-6 rounded flex items-center justify-center text-white font-bold text-xs"
+                            style={{ backgroundColor: fromPlayer.color }}
+                          >
+                            {index + 1}
+                          </div>
+                          <div className="text-xs text-gray-400">Runde {card.round}</div>
+                        </div>
+                        <p className="text-white text-sm line-clamp-2">{card.text}</p>
+                      </div>
+                    ))}
+                    {openCards.length > 3 && (
+                      <div className="text-center text-xs text-gray-400 py-2">
+                        +{openCards.length - 3} weitere
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+        
         // Handle normal process connection
         const conn = getConnections().find(
           c => c.from === selectedConnectionDetail.from && c.to === selectedConnectionDetail.to
@@ -4991,12 +5322,30 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       </div>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setSelectedConnectionDetail(null)}
-                    className="p-1 hover:bg-white/10 rounded transition-colors"
-                  >
-                    <X className="w-4 h-4 text-gray-400" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {onRemoveCard && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          console.log('🗑️ Lösche Connection mit', conn.cards.length, 'Karten');
+                          conn.cards.forEach(card => {
+                            onRemoveCard(card.id);
+                          });
+                          setSelectedConnectionDetail(null);
+                        }}
+                        className="p-2 hover:bg-red-500/20 rounded transition-colors group"
+                        title="Verbindung löschen"
+                      >
+                        <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-400" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setSelectedConnectionDetail(null)}
+                      className="p-1 hover:bg-white/10 rounded transition-colors"
+                    >
+                      <X className="w-4 h-4 text-gray-400" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Stats */}
@@ -5097,12 +5446,29 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedConnection(null)}
-                  className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5 text-gray-400" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {onRemoveCard && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        conn.cards.forEach(card => {
+                          onRemoveCard(card.id);
+                        });
+                        setSelectedConnection(null);
+                      }}
+                      className="p-2 hover:bg-red-500/20 rounded-lg transition-colors group"
+                      title="Verbindung löschen"
+                    >
+                      <Trash2 className="w-5 h-5 text-gray-400 group-hover:text-red-400" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSelectedConnection(null)}
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
               </div>
 
               <div className="mb-3 text-sm text-gray-400">
@@ -5162,8 +5528,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
         />
       )}
 
-      {/* Connection Type Selection Menu (Orange-style) */}
-      {showConnectionTypeMenu && connectionMenuPosition && connectionMenuTarget !== undefined && dragConnectionFrom && (
+      {/* Connection Type Selection Menu (Orange-style) - Nur für leeren Raum */}
+      {showConnectionTypeMenu && connectionMenuPosition && connectionMenuTarget === null && dragConnectionFrom && (
         <div
           className="fixed inset-0 z-[200]"
           onClick={() => {
@@ -5184,45 +5550,10 @@ const GameBoard: React.FC<GameBoardProps> = ({
           >
           <div className="bg-slate-800/95 backdrop-blur-xl rounded-xl shadow-2xl border-2 border-purple-400/50 overflow-hidden">
             <div className="p-2 space-y-1">
-              {connectionMenuTarget ? (
-                <>
-                  {/* Connecting to a player */}
-                  <div className="text-xs text-gray-400 px-2 py-1 font-semibold mb-1">
-                    Verbindung zu {players.find(p => p.id === connectionMenuTarget)?.name}
-                  </div>
-                  
-                  {/* Process Option */}
-                  <button
-                    onClick={() => {
-                      setShowProcessModal(true);
-                      setSelectedFromPlayer(dragConnectionFrom);
-                      setSelectedToPlayer(connectionMenuTarget);
-                      setShowConnectionTypeMenu(false);
-                      setDragConnectionFrom(null);
-                      setConnectionMenuTarget(null);
-                      setDragConnectionPosition(null);
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-purple-500/20 transition-colors rounded-lg text-left group"
-                  >
-                    <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center group-hover:bg-purple-500/30">
-                      <GitBranch className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <div>
-                      <div className="font-semibold text-white text-sm">Prozessschritt</div>
-                      <div className="text-xs text-gray-400">Normaler Prozess zwischen Spielern</div>
-                    </div>
-                  </button>
-
-                  {/* Decision Options */}
-                  <div className="border-t border-white/10 my-1"></div>
-                  <div className="text-xs text-gray-400 px-2 py-1 font-semibold">Entscheidungslogik</div>
-                </>
-              ) : (
-                <>
-                  {/* Creating new element in empty space */}
-                  <div className="text-xs text-gray-400 px-2 py-1 font-semibold mb-1">
-                    Verbindung zu Spieler
-                  </div>
+              {/* Creating new element in empty space */}
+              <div className="text-xs text-gray-400 px-2 py-1 font-semibold mb-1">
+                Verbindung zu Spieler
+              </div>
                   
                   {/* Waiting Players */}
                   {players.filter(p => p.onBoard === false).length > 0 ? (
@@ -5231,17 +5562,27 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         key={waitingPlayer.id}
                         onClick={() => {
                           console.log('🎯 Placing player at position:', dragConnectionPosition);
-                          // Place player on board and create connection
+                          // Place player on board and create direct connection
                           if (onUpdatePlayerPosition && dragConnectionPosition) {
                             onUpdatePlayerPosition(waitingPlayer.id, {
                               x: dragConnectionPosition.x,
                               y: dragConnectionPosition.y
                             });
                           }
-                          // Open process modal
-                          setShowProcessModal(true);
-                          setSelectedFromPlayer(dragConnectionFrom);
-                          setSelectedToPlayer(waitingPlayer.id);
+                          
+                          // Erstelle direkt eine Prozessverbindung
+                          const fromPlayer = players.find(p => p.id === dragConnectionFrom);
+                          if (fromPlayer && onAddCard) {
+                            onAddCard(
+                              `Prozess: ${fromPlayer.name} → ${waitingPlayer.name}`,
+                              dragConnectionFrom,
+                              waitingPlayer.id,
+                              '', // medium
+                              '', // duration
+                              '' // description
+                            );
+                          }
+                          
                           setShowConnectionTypeMenu(false);
                           setDragConnectionFrom(null);
                           setConnectionMenuTarget(null);
@@ -5285,8 +5626,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   {/* Decision Options */}
                   <div className="border-t border-white/10 my-1"></div>
                   <div className="text-xs text-gray-400 px-2 py-1 font-semibold">Entscheidung erstellen</div>
-                </>
-              )}
               
               {[
                 { icon: '⊕', name: 'XOR (Entweder-oder)', desc: 'Genau eine Option', color: '#F59E0B' },
@@ -5325,7 +5664,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               })}
             </div>
           </div>
-        </div>
+          </div>
         </div>
       )}
 

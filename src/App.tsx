@@ -236,6 +236,11 @@ const App: React.FC = () => {
     await gameService.updateProcessStep(gameId, cardId, updates);
   };
 
+  const removeCard = async (cardId: string) => {
+    if (!gameId) return;
+    await gameService.removeProcessStep(gameId, cardId);
+  };
+
   // Show landing page if no game parameter
   if (showLanding) {
     if (isInitializing) {
@@ -297,6 +302,7 @@ const App: React.FC = () => {
         maxRounds={999}
         onAddCard={addCard}
         onUpdateCard={updateCard}
+        onRemoveCard={removeCard}
         onEndTurn={() => {}}
         onRestart={() => setGameId(null)}
         isGameFinished={false}
@@ -308,7 +314,6 @@ const App: React.FC = () => {
         onRemoveProcessObject={removeProcessObject}
         onUpdateProcessObject={updateProcessObject}
         gameId={gameId}
-        onSwitchToPlayerView={() => setViewMode('player')}
       />
     </div>
   );

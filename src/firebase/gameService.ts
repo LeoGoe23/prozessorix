@@ -4,6 +4,7 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc,
+  deleteField,
   onSnapshot,
   addDoc,
   serverTimestamp,
@@ -239,8 +240,19 @@ export const updateProcessObject = async (
   updates: Partial<ProcessObject>
 ) => {
   const objectRef = doc(db, 'games', gameId, 'processObjects', objectId);
+  
+  // Konvertiere null Werte zu deleteField()
+  const cleanUpdates: any = { ...updates };
+  Object.keys(cleanUpdates).forEach(key => {
+    if (cleanUpdates[key] === undefined) {
+      delete cleanUpdates[key];
+    } else if (cleanUpdates[key] === null) {
+      cleanUpdates[key] = deleteField();
+    }
+  });
+  
   await updateDoc(objectRef, {
-    ...updates,
+    ...cleanUpdates,
     updatedAt: serverTimestamp(),
   });
 };
@@ -263,7 +275,9 @@ export const subscribeToProcessObjects = (
     const objects: ProcessObject[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data();
-      objects.push({
+      
+      // Base object mit allen gemeinsamen Feldern
+      const baseObject: any = {
         id: doc.id,
         name: data.name,
         description: data.description,
@@ -271,7 +285,31 @@ export const subscribeToProcessObjects = (
         color: data.color,
         category: data.category,
         timestamp: data.timestamp,
-      } as ProcessObject);
+      };
+      
+      // ProcessStep spezifische Felder hinzufügen
+      if (data.category === 'process-step') {
+        if (data.input !== undefined) baseObject.input = data.input;
+        if (data.output !== undefined) baseObject.output = data.output;
+        if (data.systems !== undefined) baseObject.systems = data.systems;
+        if (data.workSteps !== undefined) baseObject.workSteps = data.workSteps;
+        if (data.escalationLevel !== undefined) baseObject.escalationLevel = data.escalationLevel;
+        if (data.duration !== undefined) baseObject.duration = data.duration;
+        if (data.notes !== undefined) baseObject.notes = data.notes;
+        if (data.inWaitingArea !== undefined) baseObject.inWaitingArea = data.inWaitingArea;
+        if (data.assignedToPlayerId !== undefined) baseObject.assignedToPlayerId = data.assignedToPlayerId;
+      }
+      
+      // CommunicationMethod spezifische Felder
+      if (data.category === 'communication') {
+        if (data.speed !== undefined) baseObject.speed = data.speed;
+        if (data.reliability !== undefined) baseObject.reliability = data.reliability;
+        if (data.formality !== undefined) baseObject.formality = data.formality;
+        if (data.cost !== undefined) baseObject.cost = data.cost;
+        if (data.attributes !== undefined) baseObject.attributes = data.attributes;
+      }
+      
+      objects.push(baseObject as ProcessObject);
     });
     callback(objects);
   });

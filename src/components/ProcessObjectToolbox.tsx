@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
-import { Package, CheckSquare, Settings, MessageCircle, GitMerge } from 'lucide-react';
+import { Package, CheckSquare, Settings, GitMerge, Users } from 'lucide-react';
 import {
   ProcessObject,
   Player,
   PROCESS_STEP_ICONS,
   SYSTEM_TOOL_ICONS,
-  COMMUNICATION_ICONS,
   CONNECTOR_ICONS,
   OBJECT_COLORS,
+  ProcessStep,
 } from '../types/game';
 import CategoryCard from './CategoryCard';
 import CategoryMenu from './CategoryMenu';
+import PlayerSelectionModal from './PlayerSelectionModal';
+import ProcessStepCardModal from './ProcessStepCardModal';
+import ProcessConnectorModal from './ProcessConnectorModal';
 
 interface ProcessObjectToolboxProps {
   processObjects: ProcessObject[];
@@ -30,9 +33,10 @@ interface ProcessObjectToolboxProps {
     duration?: string,
     description?: string
   ) => void;
+  onAddPlayer?: (player: Player) => void;
 }
 
-type ObjectCategory = 'process-step' | 'system-tool' | 'communication' | 'connector';
+type ObjectCategory = 'process-step' | 'system-tool' | 'connector';
 
 interface CategoryConfig {
   label: string;
@@ -54,12 +58,6 @@ const CATEGORY_CONFIG: Record<ObjectCategory, CategoryConfig> = {
     defaultColor: OBJECT_COLORS[1],
     icon: Settings,
   },
-  'communication': {
-    label: 'Kommunikationsmittel',
-    icons: COMMUNICATION_ICONS,
-    defaultColor: OBJECT_COLORS[2],
-    icon: MessageCircle,
-  },
   'connector': {
     label: 'Prozessschrittverbinder',
     icons: CONNECTOR_ICONS,
@@ -77,8 +75,12 @@ const ProcessObjectToolbox: React.FC<ProcessObjectToolboxProps> = ({
   selectedObjectId,
   players,
   onAddCard,
+  onAddPlayer,
 }) => {
   const [openCategory, setOpenCategory] = useState<ObjectCategory | null>(null);
+  const [showPlayerModal, setShowPlayerModal] = useState(false);
+  const [showProcessStepModal, setShowProcessStepModal] = useState(false);
+  const [showConnectorModal, setShowConnectorModal] = useState(false);
 
   const getObjectsByCategory = (category: ObjectCategory): ProcessObject[] => {
     return processObjects.filter((obj) => obj.category === category);
@@ -124,7 +126,7 @@ const ProcessObjectToolbox: React.FC<ProcessObjectToolboxProps> = ({
             onCreateProcessStep={onAddCard}
           />
         ) : (
-          /* Categories Grid - Show all 4 categories */
+          /* Categories Grid - Show all 4 categories + Spieler/Rollen */
           <div className="grid grid-cols-2 gap-4">
             {(Object.keys(CATEGORY_CONFIG) as ObjectCategory[]).map((category) => {
               const config = CATEGORY_CONFIG[category];
@@ -133,13 +135,99 @@ const ProcessObjectToolbox: React.FC<ProcessObjectToolboxProps> = ({
                 <CategoryCard
                   key={category}
                   config={config}
-                  onClick={() => setOpenCategory(category)}
+                  onClick={() => {
+                    if (category === 'process-step') {
+                      setShowProcessStepModal(true);
+                    } else if (category === 'connector') {
+                      setShowConnectorModal(true);
+                    } else {
+                      setOpenCategory(category);
+                    }
+                  }}
                 />
               );
             })}
+            
+            {/* Spieler/Rollen Kachel - öffnet direkt das Modal */}
+            {onAddPlayer && (
+              <CategoryCard
+                config={{
+                  label: 'Spieler/Rollen',
+                  defaultColor: OBJECT_COLORS[4],
+                  icon: Users,
+                }}
+                onClick={() => setShowPlayerModal(true)}
+              />
+            )}
           </div>
         )}
       </div>
+
+      {/* Player Selection Modal */}
+      {showPlayerModal && onAddPlayer && (
+        <PlayerSelectionModal
+          onClose={() => {
+            setShowPlayerModal(false);
+            setOpenCategory(null);
+          }}
+          onSubmit={(playerData) => {
+            const randomColor = OBJECT_COLORS[Math.floor(Math.random() * OBJECT_COLORS.length)];
+            const newPlayer: Player = {
+              id: `player-${Date.now()}`,
+              name: playerData.name,
+              role: playerData.role,
+              department: playerData.department,
+              color: randomColor,
+              icon: playerData.icon,
+              onBoard: false,
+            };
+            onAddPlayer(newPlayer);
+            setShowPlayerModal(false);
+            setOpenCategory(null);
+          }}
+        />
+      )}
+
+      {/* Process Step Card Modal */}
+      {showProcessStepModal && (
+        <ProcessStepCardModal
+          onClose={() => setShowProcessStepModal(false)}
+          onSubmit={(stepData) => {
+            const newProcessStep: Omit<ProcessStep, 'id' | 'timestamp'> = {
+              name: stepData.name,
+              category: 'process-step',
+              icon: '📝',
+              color: OBJECT_COLORS[0],
+              input: stepData.input,
+              output: stepData.output,
+              systems: stepData.systems,
+              workSteps: stepData.workSteps,
+              escalationLevel: stepData.escalationLevel,
+              duration: stepData.duration,
+              notes: stepData.notes,
+              inWaitingArea: true,
+            };
+            console.log('Creating process step with inWaitingArea:', newProcessStep);
+            onAddObject(newProcessStep as Omit<ProcessObject, 'id' | 'timestamp'>);
+            setShowProcessStepModal(false);
+          }}
+        />
+      )}
+
+      {/* Process Connector Modal */}
+      {showConnectorModal && (
+        <ProcessConnectorModal
+          onClose={() => setShowConnectorModal(false)}
+          onSelectProcessStep={() => {
+            // TODO: Aktiviere Prozesslinien-Modus
+            console.log('Prozessschritt-Verbindung ausgewählt');
+          }}
+          onSelectDecision={() => {
+            // TODO: Aktiviere Entscheidungs-Modus
+            console.log('Entscheidung ausgewählt');
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -4,6 +4,7 @@ export interface Player {
   role: string;
   color: string;
   icon: string;  // Emoji icon for the player
+  department?: string;  // Abteilung
   description?: string;  // Freitext-Beschreibung der Rolle/Aufgaben
   position?: { x: number; y: number };  // Custom position (in percentage)
   onBoard?: boolean;  // Ist der Spieler auf dem Spielfeld? (false = im Wartebereich)
@@ -45,6 +46,7 @@ export interface ProcessCard {
   communicationObjectIds?: string[];  // IDs der Kommunikationsmittel-Objekte (für visuelle Darstellung)
   isDecision?: boolean;  // Ist dies ein Entscheidungspunkt?
   decision?: Decision;   // Die Entscheidungsinformationen
+  openEndPosition?: { x: number; y: number };  // Position des offenen Endes (in %) für unvollständige Verbindungen
 }
 
 // Process Object Types
@@ -56,6 +58,17 @@ export interface ProcessStep {
   color: string;
   category: 'process-step';
   timestamp: number;
+  // Erweiterte Felder für Prozessschrittkarte
+  input?: string;
+  output?: string;
+  systems?: string;
+  workSteps?: string;
+  escalationLevel?: string;
+  duration?: string;
+  notes?: string;
+  inWaitingArea?: boolean;  // Ist der Prozessschritt in der Wartebox?
+  assignedToPlayerId?: string;  // Welchem Spieler ist der Schritt zugeordnet?
+  position?: { x: number; y: number };  // Position auf dem Spielfeld (in %)
 }
 
 export interface SystemTool {
@@ -96,7 +109,7 @@ export interface ProcessConnector {
 
 export type ProcessObject = ProcessStep | SystemTool | CommunicationMethod | ProcessConnector;
 
-export type GameBoardView = 'player-centric' | 'swimlane' | 'eingabe';
+export type GameBoardView = 'player-centric' | 'swimlane';
 
 export interface GameState {
   players: Player[];
