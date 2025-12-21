@@ -4,6 +4,7 @@ import { Users, Plus, Trash2, ChevronDown, UserPlus, GitBranch, X, Share2, User,
 import ShareGameModal from './ShareGameModal';
 import IconPicker from './IconPicker';
 import ProcessObjectToolbox from './ProcessObjectToolbox';
+import * as gameService from '../firebase/gameService';
 
 interface GameBoardProps {
   players: Player[];
@@ -69,6 +70,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   // Drag & Drop
   const [draggedPlayer, setDraggedPlayer] = React.useState<string | null>(null);
   const [draggedProcessStep, setDraggedProcessStep] = React.useState<string | null>(null);
+  const [draggedProcessStepOriginalState, setDraggedProcessStepOriginalState] = React.useState<{inWaitingArea: boolean, position: any, assignedToPlayerId: any} | null>(null);
   const gameBoardRef = React.useRef<HTMLDivElement>(null);
   
   // Placed communication objects on field
@@ -144,6 +146,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [showManagementMenu, setShowManagementMenu] = React.useState(false);
   const [saveName, setSaveName] = React.useState('');
   const [saveMessage, setSaveMessage] = React.useState('');
+  const [gameVersions, setGameVersions] = React.useState<Array<{ id: string, name: string, timestamp: any }>>([]);
+  const [showVersions, setShowVersions] = React.useState(false);
   
   // State for decision creation
   const [isDecisionMode, setIsDecisionMode] = React.useState(false);
@@ -218,6 +222,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedConnectionDetail, inspectedPlayer, players, cards, onRemoveCard, onAddPlayer]);
+
+  // Subscribe to game versions
+  React.useEffect(() => {
+    if (!gameId) return;
+    
+    const unsubscribe = gameService.subscribeToGameVersions(gameId, (versions) => {
+      setGameVersions(versions);
+    });
+    
+    return unsubscribe;
+  }, [gameId]);
 
   // Helper function to get the last recipient (for auto-selecting next sender)
   const getLastRecipient = () => {
@@ -1003,7 +1018,25 @@ const GameBoard: React.FC<GameBoardProps> = ({
     e.preventDefault();
     e.stopPropagation();
     
+    console.log('🎯 handleProcessStepMouseDown - ID:', processStepId);
+    
+    // Speichere den ursprünglichen Zustand
+    const processStep = processObjects.find(obj => obj.id === processStepId);
+    console.log('📦 Gefundener Prozessschritt:', processStep);
+    
+    if (processStep && 'inWaitingArea' in processStep) {
+      const step = processStep as ProcessStep;
+      const originalState = {
+        inWaitingArea: step.inWaitingArea || false,
+        position: step.position,
+        assignedToPlayerId: step.assignedToPlayerId
+      };
+      console.log('💾 Speichere ursprünglichen Zustand:', originalState);
+      setDraggedProcessStepOriginalState(originalState);
+    }
+    
     setDraggedProcessStep(processStepId);
+    console.log('✅ draggedProcessStep gesetzt auf:', processStepId);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -1147,46 +1180,76 @@ const GameBoard: React.FC<GameBoardProps> = ({
     
     // Wenn ein Prozessschritt gezogen wurde
     if (currentDraggedProcessStep && gameBoardRef.current && onUpdateProcessObject) {
+      console.log('🖱️ MouseUp mit Prozessschritt:', currentDraggedProcessStep);
+      console.log('📍 Ursprünglicher Zustand:', draggedProcessStepOriginalState);
+      
       const mouseX = e.clientX;
       const mouseY = e.clientY;
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
       
-      // Prüfe ob über einem Spieler gedroppt
-      const targetPlayer = players.find(player => {
-        if (!player.position || player.onBoard === false) return false;
-        
-        const boardRect = gameBoardRef.current!.getBoundingClientRect();
-        const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
-        const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
-        
-        const distance = Math.sqrt(
-          Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
-        );
-        
-        return distance < 60;
-      });
+      // Prüfe ob über dem Spielfeld
+      const isOverBoard = mouseX >= boardRect.left && 
+                         mouseX <= boardRect.right && 
+                         mouseY >= boardRect.top && 
+                         mouseY <= boardRect.bottom;
       
-      if (targetPlayer) {
-        // Prozessschritt dem Spieler zuordnen
-        console.log('✅ Verknüpfe Prozessschritt mit Spieler:', targetPlayer.name);
+      console.log('🎯 Über dem Board:', isOverBoard, { mouseX, mouseY, boardRect });
+      
+      let wasPlaced = false;
+      
+      if (isOverBoard) {
+        // Prüfe ob über einem Spieler gedroppt
+        const targetPlayer = players.find(player => {
+          if (!player.position || player.onBoard === false) return false;
+          
+          const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+          const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+          
+          const distance = Math.sqrt(
+            Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
+          );
+          
+          return distance < 60;
+        });
+        
+        if (targetPlayer) {
+          // Prozessschritt dem Spieler zuordnen
+          console.log('✅ Verknüpfe Prozessschritt mit Spieler:', targetPlayer.name);
+          onUpdateProcessObject(currentDraggedProcessStep, {
+            inWaitingArea: false,
+            assignedToPlayerId: targetPlayer.id,
+            position: null as any
+          } as Partial<ProcessObject>);
+          wasPlaced = true;
+        } else {
+          // Frei auf dem Spielfeld platzieren
+          const x = ((mouseX - boardRect.left) / boardRect.width) * 100;
+          const y = ((mouseY - boardRect.top) / boardRect.height) * 100;
+          const clampedX = Math.max(8, Math.min(92, x));
+          const clampedY = Math.max(8, Math.min(92, y));
+          
+          console.log('✅ Platziere Prozessschritt frei auf Spielfeld:', clampedX, clampedY);
+          onUpdateProcessObject(currentDraggedProcessStep, {
+            inWaitingArea: false,
+            position: { x: clampedX, y: clampedY },
+            assignedToPlayerId: null as any
+          } as Partial<ProcessObject>);
+          wasPlaced = true;
+        }
+      }
+      
+      // Wenn nicht platziert wurde, stelle ursprünglichen Zustand wieder her
+      if (!wasPlaced && draggedProcessStepOriginalState) {
+        console.log('↩️ Prozessschritt nicht platziert - stelle ursprünglichen Zustand wieder her:', draggedProcessStepOriginalState);
         onUpdateProcessObject(currentDraggedProcessStep, {
-          inWaitingArea: false,
-          assignedToPlayerId: targetPlayer.id,
-          position: null as any
+          inWaitingArea: draggedProcessStepOriginalState.inWaitingArea,
+          position: draggedProcessStepOriginalState.position,
+          assignedToPlayerId: draggedProcessStepOriginalState.assignedToPlayerId
         } as Partial<ProcessObject>);
+      } else if (!wasPlaced) {
+        console.warn('⚠️ Prozessschritt nicht platziert UND kein ursprünglicher Zustand gespeichert!');
       } else {
-        // Frei auf dem Spielfeld platzieren
-        const boardRect = gameBoardRef.current.getBoundingClientRect();
-        const x = ((mouseX - boardRect.left) / boardRect.width) * 100;
-        const y = ((mouseY - boardRect.top) / boardRect.height) * 100;
-        const clampedX = Math.max(8, Math.min(92, x));
-        const clampedY = Math.max(8, Math.min(92, y));
-        
-        console.log('✅ Platziere Prozessschritt frei auf Spielfeld:', clampedX, clampedY);
-        onUpdateProcessObject(currentDraggedProcessStep, {
-          inWaitingArea: false,
-          position: { x: clampedX, y: clampedY },
-          assignedToPlayerId: null as any
-        } as Partial<ProcessObject>);
+        console.log('✅ Prozessschritt wurde platziert');
       }
     }
 
@@ -1245,6 +1308,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     
     setDraggedPlayer(null);
     setDraggedProcessStep(null);
+    setDraggedProcessStepOriginalState(null);
     setDragPreviewPosition(null);
   };
 
@@ -2007,45 +2071,193 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     className="fixed inset-0 z-40" 
                     onClick={() => setShowManagementMenu(false)}
                   />
-                  <div className="absolute top-full right-0 mt-2 w-80 bg-slate-800 rounded-xl shadow-2xl border border-white/20 p-4 z-50">
-                    <h3 className="text-white font-semibold mb-3">Spiel speichern</h3>
-                    
-                    <input
-                      type="text"
-                      value={saveName}
-                      onChange={(e) => setSaveName(e.target.value)}
-                      placeholder="Name eingeben..."
-                      className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-white/10 focus:border-blue-400 focus:outline-none mb-3"
-                    />
-                    
-                    {saveMessage && (
-                      <div className="mb-3 px-3 py-2 bg-green-500/20 text-green-300 rounded-lg text-sm">
-                        {saveMessage}
+                  <div className="absolute top-full right-0 mt-2 w-[500px] bg-slate-800 rounded-2xl shadow-2xl border border-white/20 z-50 max-h-[600px] overflow-y-auto">
+                    {!showVersions ? (
+                      <div className="p-6">
+                        <div className="flex items-center gap-3 mb-6">
+                          <div className="p-3 bg-blue-500/20 rounded-xl">
+                            <svg className="w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                              <polyline points="17 21 17 13 7 13 7 21" />
+                              <polyline points="7 3 7 8 15 8" />
+                            </svg>
+                          </div>
+                          <div>
+                            <h3 className="text-white font-bold text-xl">Spiel speichern</h3>
+                            <p className="text-gray-400 text-sm">Erstelle eine neue Version</p>
+                          </div>
+                        </div>
+                        
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-300 mb-2">Versionsname</label>
+                          <input
+                            type="text"
+                            value={saveName}
+                            onChange={(e) => setSaveName(e.target.value)}
+                            placeholder="z.B. Version 1.0, Zwischenstand, Finale Version..."
+                            className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-blue-400 focus:outline-none text-base"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && saveName.trim() && gameId) {
+                                e.preventDefault();
+                                const saveBtn = document.getElementById('save-version-btn');
+                                saveBtn?.click();
+                              }
+                            }}
+                          />
+                        </div>
+                        
+                        {saveMessage && (
+                          <div className="mb-4 px-4 py-3 bg-green-500/20 text-green-300 rounded-xl text-sm font-medium flex items-center gap-2">
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            {saveMessage}
+                          </div>
+                        )}
+                        
+                        <div className="space-y-3">
+                          <button
+                            id="save-version-btn"
+                            onClick={async () => {
+                              if (saveName.trim() && gameId) {
+                                try {
+                                  await gameService.saveGameVersion(gameId, saveName.trim(), {
+                                    players,
+                                    cards,
+                                    processObjects
+                                  });
+                                  setSaveMessage('Version gespeichert!');
+                                  setTimeout(() => {
+                                    setSaveMessage('');
+                                    setSaveName('');
+                                  }, 2000);
+                                } catch (error) {
+                                  console.error('Fehler beim Speichern:', error);
+                                  setSaveMessage('Fehler beim Speichern');
+                                }
+                              }
+                            }}
+                            disabled={!saveName.trim()}
+                            className="w-full flex items-center justify-center gap-3 px-5 py-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold text-base shadow-lg hover:shadow-xl disabled:shadow-none"
+                          >
+                            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                              <polyline points="17 21 17 13 7 13 7 21" />
+                              <polyline points="7 3 7 8 15 8" />
+                            </svg>
+                            Version speichern
+                          </button>
+                          
+                          <button
+                            onClick={() => setShowVersions(true)}
+                            className="w-full flex items-center justify-center gap-3 px-5 py-4 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-all font-semibold text-base border border-white/10"
+                          >
+                            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                            </svg>
+                            Gespeicherte Versionen anzeigen
+                            {gameVersions.length > 0 && (
+                              <span className="ml-auto px-2.5 py-1 bg-blue-500/20 text-blue-300 rounded-lg text-sm font-bold">
+                                {gameVersions.length}
+                              </span>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-6">
+                        <div className="flex items-center justify-between mb-6">
+                          <div className="flex items-center gap-3">
+                            <div className="p-3 bg-purple-500/20 rounded-xl">
+                              <svg className="w-6 h-6 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                              </svg>
+                            </div>
+                            <div>
+                              <h3 className="text-white font-bold text-xl">Gespeicherte Versionen</h3>
+                              <p className="text-gray-400 text-sm">{gameVersions.length} {gameVersions.length === 1 ? 'Version' : 'Versionen'} verfügbar</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setShowVersions(false)}
+                            className="p-2 hover:bg-white/10 rounded-xl transition-colors"
+                          >
+                            <X className="w-5 h-5 text-gray-400" />
+                          </button>
+                        </div>
+                        
+                        {gameVersions.length === 0 ? (
+                          <div className="text-center py-12">
+                            <div className="w-16 h-16 bg-gray-700/50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                              <svg className="w-8 h-8 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                              </svg>
+                            </div>
+                            <p className="text-gray-400 font-medium">Keine gespeicherten Versionen</p>
+                            <p className="text-gray-500 text-sm mt-1">Erstelle deine erste Version im Speichern-Tab</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {gameVersions.map((version, index) => (
+                              <button
+                                key={version.id}
+                                onClick={async () => {
+                                  if (gameId && window.confirm(`Version "${version.name}" laden?\n\nDer aktuelle Spielstand wird überschrieben!`)) {
+                                    try {
+                                      await gameService.loadGameVersion(gameId, version.id);
+                                      setSaveMessage('Version geladen!');
+                                      setShowVersions(false);
+                                      setTimeout(() => {
+                                        setSaveMessage('');
+                                        setShowManagementMenu(false);
+                                      }, 1500);
+                                    } catch (error) {
+                                      console.error('Fehler beim Laden:', error);
+                                      alert('Fehler beim Laden der Version');
+                                    }
+                                  }
+                                }}
+                                className="w-full text-left p-4 bg-slate-700/50 hover:bg-slate-700 rounded-xl transition-all border border-white/10 hover:border-purple-400/30 group"
+                              >
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-bold">
+                                        #{gameVersions.length - index}
+                                      </span>
+                                      <div className="font-semibold text-white text-base group-hover:text-purple-300 transition-colors">
+                                        {version.name}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-4 text-xs text-gray-400">
+                                      <div className="flex items-center gap-1">
+                                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <circle cx="12" cy="12" r="10" />
+                                          <polyline points="12 6 12 12 16 14" />
+                                        </svg>
+                                        {version.timestamp?.toDate ? new Date(version.timestamp.toDate()).toLocaleString('de-DE', {
+                                          day: '2-digit',
+                                          month: '2-digit',
+                                          year: 'numeric',
+                                          hour: '2-digit',
+                                          minute: '2-digit'
+                                        }) : 'Gerade eben'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <svg className="w-5 h-5 text-gray-400 group-hover:text-purple-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M9 18l6-6-6-6" />
+                                  </svg>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
-                    
-                    <button
-                      onClick={() => {
-                        if (saveName.trim()) {
-                          // TODO: Später tatsächlich speichern
-                          setSaveMessage('Spiel gespeichert');
-                          setTimeout(() => {
-                            setSaveMessage('');
-                            setSaveName('');
-                            setShowManagementMenu(false);
-                          }, 2000);
-                        }
-                      }}
-                      disabled={!saveName.trim()}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
-                    >
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-                        <polyline points="17 21 17 13 7 13 7 21" />
-                        <polyline points="7 3 7 8 15 8" />
-                      </svg>
-                      Speichern
-                    </button>
                   </div>
                 </>
               )}
@@ -3255,30 +3467,42 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 flex flex-col gap-2">
                           {linkedSteps.map((obj) => {
                             const step = obj as ProcessStep;
+                            const isDragging = draggedProcessStep === step.id;
                             return (
                             <div
                               key={step.id}
-                              className="bg-teal-500/90 backdrop-blur rounded-lg p-2 shadow-lg border border-teal-400/50 w-40 cursor-move"
+                              className={`bg-gradient-to-br from-teal-500 to-teal-600 backdrop-blur rounded-xl p-3 shadow-xl border-2 border-teal-300/50 w-44 cursor-grab active:cursor-grabbing hover:scale-105 hover:shadow-2xl transition-all ${isDragging ? 'opacity-30 scale-95' : ''}`}
                               style={{ zIndex: 10 }}
                               onMouseDown={(e) => {
                                 e.stopPropagation();
+                                // Speichere ursprünglichen Zustand
+                                setDraggedProcessStepOriginalState({
+                                  inWaitingArea: step.inWaitingArea || false,
+                                  position: step.position,
+                                  assignedToPlayerId: step.assignedToPlayerId
+                                });
                                 setDraggedProcessStep(step.id);
                               }}
                             >
-                              <div className="font-bold text-white text-xs mb-1">{step.name}</div>
+                              <div className="font-bold text-white text-sm mb-2 leading-tight">
+                                {step.name}
+                              </div>
                               {step.input && (
-                                <div className="text-[10px] text-teal-100 mb-0.5">
-                                  📥 {step.input}
+                                <div className="text-[11px] text-teal-50/90 mb-1.5 flex items-start gap-1.5 bg-white/10 rounded-lg px-2 py-1">
+                                  <span className="opacity-70 flex-shrink-0">📥</span>
+                                  <span className="flex-1">{step.input}</span>
                                 </div>
                               )}
                               {step.output && (
-                                <div className="text-[10px] text-teal-100">
-                                  📤 {step.output}
+                                <div className="text-[11px] text-teal-50/90 mb-1.5 flex items-start gap-1.5 bg-white/10 rounded-lg px-2 py-1">
+                                  <span className="opacity-70 flex-shrink-0">📤</span>
+                                  <span className="flex-1">{step.output}</span>
                                 </div>
                               )}
                               {step.duration && (
-                                <div className="text-[10px] text-teal-100 mt-1">
-                                  ⏱️ {step.duration}
+                                <div className="text-[11px] text-teal-50/90 mt-2 pt-2 border-t border-teal-400/30 flex items-center gap-1.5">
+                                  <span className="opacity-70">⏱️</span>
+                                  <span className="font-medium">{step.duration}</span>
                                 </div>
                               )}
                             </div>
@@ -3314,6 +3538,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     }}
                     onMouseDown={(e) => {
                       e.stopPropagation();
+                      // Speichere ursprünglichen Zustand
+                      setDraggedProcessStepOriginalState({
+                        inWaitingArea: step.inWaitingArea || false,
+                        position: step.position,
+                        assignedToPlayerId: step.assignedToPlayerId
+                      });
                       setDraggedProcessStep(step.id);
                       setDragPreviewPosition({ x: step.position!.x, y: step.position!.y });
                     }}
@@ -4413,9 +4643,21 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 
                 {/* Prozessschritte in der gleichen Wartebox */}
                 {(() => {
-                  const waitingSteps = processObjects.filter(obj => obj.category === 'process-step' && obj.inWaitingArea);
+                  const waitingSteps = processObjects.filter(obj => {
+                    if (obj.category !== 'process-step') return false;
+                    const step = obj as ProcessStep;
+                    // Explizit auf true prüfen UND dass keine andere Platzierung existiert
+                    return step.inWaitingArea === true || (!step.position && !step.assignedToPlayerId);
+                  });
                   console.log('All process objects:', processObjects);
                   console.log('Waiting steps:', waitingSteps);
+                  console.log('Process objects details:', processObjects.map(obj => ({
+                    id: obj.id,
+                    category: obj.category,
+                    inWaitingArea: (obj as any).inWaitingArea,
+                    assignedToPlayerId: (obj as any).assignedToPlayerId,
+                    position: (obj as any).position
+                  })));
                   return waitingSteps.length > 0 && (
                     <>
                       <div className="border-t border-white/10 my-4"></div>
@@ -4440,19 +4682,19 @@ const GameBoard: React.FC<GameBoardProps> = ({
                           const processStep = step as ProcessStep;
                           const isDragging = draggedProcessStep === step.id;
                           
-                          if (isDragging) return null;
-                          
                           return (
                             <div
                               key={step.id}
-                              className="flex-shrink-0 bg-gradient-to-br from-teal-600/80 to-teal-800/80 rounded-lg p-3 border border-teal-400/30 hover:border-teal-400/50 transition-all hover:scale-105 cursor-grab active:cursor-grabbing min-w-[120px]"
+                              className={`flex-shrink-0 bg-gradient-to-br from-teal-600/80 to-teal-800/80 rounded-xl p-3 border-2 border-teal-400/30 hover:border-teal-400/50 transition-all hover:scale-105 cursor-grab active:cursor-grabbing min-w-[140px] hover:shadow-xl ${isDragging ? 'opacity-30 scale-95' : ''}`}
                               onMouseDown={(e) => handleProcessStepMouseDown(e, step.id)}
                             >
                               <div className="text-white">
-                                <div className="text-2xl mb-1">{step.icon}</div>
-                                <div className="text-xs font-semibold mb-1 line-clamp-2">{step.name}</div>
+                                <div className="text-sm font-bold mb-2 line-clamp-2 leading-tight">{step.name}</div>
                                 {processStep.duration && (
-                                  <div className="text-[10px] text-teal-200 opacity-80">⏱ {processStep.duration}</div>
+                                  <div className="text-[10px] text-teal-200/80 flex items-center gap-1 bg-white/10 rounded px-2 py-1">
+                                    <span>⏱</span>
+                                    <span>{processStep.duration}</span>
+                                  </div>
                                 )}
                               </div>
                             </div>

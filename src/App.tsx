@@ -287,12 +287,6 @@ const App: React.FC = () => {
   // Master View - Full desktop view
   return (
     <div className="relative h-screen">
-      {/* Game ID Display */}
-      <div className="absolute top-4 left-4 z-50 bg-slate-800/90 backdrop-blur-xl rounded-xl px-4 py-2 border border-white/10 shadow-lg">
-        <div className="text-xs text-gray-400">Spiel-Code:</div>
-        <div className="text-lg font-bold text-white font-mono tracking-wider">{gameId}</div>
-      </div>
-
       <GameBoard
         players={players}
         cards={cards}

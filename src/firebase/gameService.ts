@@ -314,3 +314,85 @@ export const subscribeToProcessObjects = (
     callback(objects);
   });
 };
+
+// Save game version
+export const saveGameVersion = async (gameId: string, versionName: string, data: { players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }) => {
+  // Remove undefined values from the data
+  const cleanData = (obj: any): any => {
+    if (Array.isArray(obj)) {
+      return obj.map(cleanData);
+    }
+    if (obj && typeof obj === 'object') {
+      const cleaned: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined) {
+          cleaned[key] = cleanData(value);
+        }
+      }
+      return cleaned;
+    }
+    return obj;
+  };
+
+  const versionRef = doc(collection(db, 'games', gameId, 'versions'));
+  await setDoc(versionRef, {
+    name: versionName,
+    players: cleanData(data.players),
+    cards: cleanData(data.cards),
+    processObjects: cleanData(data.processObjects),
+    timestamp: serverTimestamp(),
+  });
+  return versionRef.id;
+};
+
+// Load game versions
+export const subscribeToGameVersions = (gameId: string, callback: (versions: Array<{ id: string, name: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }>) => void) => {
+  const versionsRef = collection(db, 'games', gameId, 'versions');
+  const q = query(versionsRef, orderBy('timestamp', 'desc'));
+  
+  return onSnapshot(q, (snapshot) => {
+    const versions = snapshot.docs.map(doc => ({
+      id: doc.id,
+      name: doc.data().name,
+      timestamp: doc.data().timestamp,
+      players: doc.data().players || [],
+      cards: doc.data().cards || [],
+      processObjects: doc.data().processObjects || [],
+    }));
+    callback(versions);
+  });
+};
+
+// Load a specific version
+export const loadGameVersion = async (gameId: string, versionId: string) => {
+  const versionRef = doc(db, 'games', gameId, 'versions', versionId);
+  const versionSnap = await getDoc(versionRef);
+  
+  if (!versionSnap.exists()) {
+    throw new Error('Version not found');
+  }
+  
+  const versionData = versionSnap.data();
+  
+  // Replace current game state with version data
+  const playersRef = collection(db, 'games', gameId, 'players');
+  const cardsRef = collection(db, 'games', gameId, 'cards');
+  const objectsRef = collection(db, 'games', gameId, 'objects');
+  
+  // Clear existing data (we'll just overwrite for simplicity)
+  // Load players
+  for (const player of versionData.players) {
+    await setDoc(doc(playersRef, player.id), player);
+  }
+  
+  // Load cards
+  for (const card of versionData.cards) {
+    await setDoc(doc(cardsRef, card.id), card);
+  }
+  
+  // Load objects
+  for (const obj of versionData.processObjects) {
+    await setDoc(doc(objectsRef, obj.id), obj);
+  }
+};
+
