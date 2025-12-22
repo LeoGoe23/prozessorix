@@ -245,19 +245,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
     return sortedCards[sortedCards.length - 1].toPlayerId;
   };
 
-  // Function to open process modal with auto-selected sender
-  const openProcessModalWithAutoSender = () => {
-    const lastRecipient = getLastRecipient();
-    if (lastRecipient) {
-      setSelectedFromPlayer(lastRecipient);
-      setSelectedToPlayer(null);
-    } else {
-      setSelectedFromPlayer(null);
-      setSelectedToPlayer(null);
-    }
-    setShowProcessModal(true);
-  };
-
   const handleAddPlayer = () => {
     if (currentName.trim() && currentRole.trim()) {
       const randomColor = PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
