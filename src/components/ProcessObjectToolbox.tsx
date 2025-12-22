@@ -34,6 +34,7 @@ interface ProcessObjectToolboxProps {
     description?: string
   ) => void;
   onAddPlayer?: (player: Player) => void;
+  onAddDecision?: () => void;
 }
 
 type ObjectCategory = 'process-step' | 'system-tool' | 'connector';
@@ -76,6 +77,7 @@ const ProcessObjectToolbox: React.FC<ProcessObjectToolboxProps> = ({
   players,
   onAddCard,
   onAddPlayer,
+  onAddDecision,
 }) => {
   const [openCategory, setOpenCategory] = useState<ObjectCategory | null>(null);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
@@ -219,12 +221,21 @@ const ProcessObjectToolbox: React.FC<ProcessObjectToolboxProps> = ({
         <ProcessConnectorModal
           onClose={() => setShowConnectorModal(false)}
           onSelectProcessStep={() => {
-            // TODO: Aktiviere Prozesslinien-Modus
-            console.log('Prozessschritt-Verbindung ausgewählt');
+            if (onAddCard) {
+              onAddCard(
+                'Freier Prozess',
+                '', // kein Sender
+                '', // kein Empfänger
+                '', // medium
+                '', // duration
+                '' // description
+              );
+            }
           }}
           onSelectDecision={() => {
-            // TODO: Aktiviere Entscheidungs-Modus
-            console.log('Entscheidung ausgewählt');
+            if (onAddDecision) {
+              onAddDecision();
+            }
           }}
         />
       )}

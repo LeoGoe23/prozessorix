@@ -13,6 +13,10 @@ const App: React.FC = () => {
   const [processObjects, setProcessObjects] = useState<ProcessObject[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [viewMode, setViewMode] = useState<'master' | 'player'>('master');
+  const [userName, setUserName] = useState<string>('');
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [userPassword, setUserPassword] = useState<string>('');
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
 
   // Initialize: Check URL - Landing Page or Game
   useEffect(() => {
@@ -42,9 +46,13 @@ const App: React.FC = () => {
         await gameService.createGame(newGameId);
         setGameId(newGameId);
         window.history.pushState({}, '', `?game=${newGameId}`);
+        // Show login modal when starting new game
+        setShowLoginModal(true);
       } else {
         // Join existing game from URL
         setGameId(gameParam.toUpperCase());
+        // Show login modal when joining game if not logged in
+        setShowLoginModal(true);
       }
       
       setIsInitializing(false);
@@ -185,16 +193,13 @@ const App: React.FC = () => {
       return;
     }
     
-    const fromPlayer = players.find(p => p.id === fromPlayerId);
-    if (!fromPlayer) {
-      console.error('❌ App.tsx: fromPlayer not found!', fromPlayerId);
-      return;
-    }
+    // fromPlayer kann leer sein bei freien Verbindungen
+    const fromPlayer = fromPlayerId ? players.find(p => p.id === fromPlayerId) : null;
     
     const newCard: ProcessCard = {
       id: `card-${Date.now()}`,
-      playerId: fromPlayer.id,
-      playerName: fromPlayer.name,
+      playerId: fromPlayer?.id || '',
+      playerName: fromPlayer?.name || 'Freie Verbindung',
       text,
       round: 1,
       order: cards.length + 1,
@@ -253,7 +258,51 @@ const App: React.FC = () => {
         </div>
       );
     }
-    return <LandingPage />;
+    return (
+      <>
+        <LandingPage />
+        {/* Login Modal */}
+        {showLoginModal && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200]">
+            <div className="bg-slate-800 rounded-2xl shadow-2xl border border-white/20 p-8 max-w-md w-full mx-4">
+              <h2 className="text-2xl font-bold text-white mb-4">Anmelden</h2>
+              <p className="text-gray-400 mb-6">Gib deinen Namen ein, um fortzufahren</p>
+              <input
+                type="text"
+                value={userName}
+                onChange={(e) => setUserName(e.target.value)}
+                placeholder="Dein Name"
+                className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none mb-6"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && userName.trim()) {
+                    setShowLoginModal(false);
+                  }
+                }}
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowLoginModal(false)}
+                  className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-all"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  onClick={() => {
+                    if (userName.trim()) {
+                      setShowLoginModal(false);
+                    }
+                  }}
+                  disabled={!userName.trim()}
+                  className="flex-1 px-4 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold"
+                >
+                  Anmelden
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
   }
 
   // Show loading while initializing game
@@ -308,7 +357,90 @@ const App: React.FC = () => {
         onRemoveProcessObject={removeProcessObject}
         onUpdateProcessObject={updateProcessObject}
         gameId={gameId}
+        userName={userName}
+        onShowLogin={() => setShowLoginModal(true)}
       />
+      
+      {/* Login Modal */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200]">
+          <div className="bg-slate-800 rounded-2xl shadow-2xl border border-white/20 p-8 max-w-md w-full mx-4">
+            <h2 className="text-2xl font-bold text-white mb-4">Anmelden</h2>
+            <p className="text-gray-400 mb-6">Gib deine Daten ein, um fortzufahren</p>
+            
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="Dein Name"
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                      setShowLoginModal(false);
+                    }
+                  }}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">E-Mail</label>
+                <input
+                  type="email"
+                  value={userEmail}
+                  onChange={(e) => setUserEmail(e.target.value)}
+                  placeholder="deine@email.de"
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                      setShowLoginModal(false);
+                    }
+                  }}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Passwort</label>
+                <input
+                  type="password"
+                  value={userPassword}
+                  onChange={(e) => setUserPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                      setShowLoginModal(false);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLoginModal(false)}
+                className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-all"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={() => {
+                  if (userName.trim() && userEmail.trim() && userPassword.trim()) {
+                    setShowLoginModal(false);
+                  }
+                }}
+                disabled={!userName.trim() || !userEmail.trim() || !userPassword.trim()}
+                className="flex-1 px-4 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold"
+              >
+                Anmelden
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

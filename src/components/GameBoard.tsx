@@ -13,7 +13,7 @@ interface GameBoardProps {
   currentPlayerIndex: number;
   currentRound: number;
   maxRounds: number;
-  onAddCard: (text: string, fromPlayerId: string, toPlayerId: string, medium?: string, duration?: string, description?: string) => void;
+  onAddCard: (text: string, fromPlayerId: string | '', toPlayerId: string | '', medium?: string, duration?: string, description?: string) => void;
   onUpdateCard?: (cardId: string, updates: Partial<ProcessCard>) => void;
   onRemoveCard?: (cardId: string) => void;
   onEndTurn: () => void;
@@ -27,6 +27,8 @@ interface GameBoardProps {
   onRemoveProcessObject: (objectId: string) => void;
   onUpdateProcessObject?: (objectId: string, updates: Partial<ProcessObject>) => void;
   gameId?: string;
+  userName?: string;
+  onShowLogin?: () => void;
 }
 
 const GameBoard: React.FC<GameBoardProps> = ({
@@ -43,6 +45,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
   onRemoveProcessObject,
   onUpdateProcessObject,
   gameId,
+  userName,
+  onShowLogin,
 }) => {
   const [showDropdown, setShowDropdown] = React.useState(false);
   const [showPlayerModal, setShowPlayerModal] = React.useState(false);
@@ -940,10 +944,11 @@ const GameBoard: React.FC<GameBoardProps> = ({
       // Ins Leere gezogen - erstelle Prozess-Karte ohne Empfänger MIT Position
       if (onAddCard && dragConnectionPosition) {
         const endPosition = { x: dragConnectionPosition.x, y: dragConnectionPosition.y };
-        console.log('📍 Erstelle freien Prozessschritt von', fromPlayer.name, 'zu Position:', endPosition);
+        const fromPlayerName = fromPlayer ? fromPlayer.name : 'Unbekannt';
+        console.log('📍 Erstelle freien Prozessschritt von', fromPlayerName, 'zu Position:', endPosition);
         
         onAddCard(
-          `Prozess von ${fromPlayer.name}`,
+          fromPlayer ? `Prozess von ${fromPlayerName}` : 'Freier Prozess',
           dragConnectionFrom,
           '', // kein Empfänger
           '', // medium
@@ -1124,21 +1129,30 @@ const GameBoard: React.FC<GameBoardProps> = ({
           const dropY = ((mouseY - boardRect.top) / boardRect.height) * 100;
           
           // Prüfe ob Spieler auf eine offene Verbindung gezogen wird
-          const openConnections = cards.filter(card => card.fromPlayerId && !card.toPlayerId);
+          const openConnections = cards.filter(card => !card.toPlayerId); // Alle ohne Empfänger
           console.log('🔍 Offene Verbindungen gefunden:', openConnections.length, openConnections);
           let connectedToOpenEnd = false;
           
           for (const card of openConnections) {
-            const fromPlayer = players.find(p => p.id === card.fromPlayerId);
-            if (!fromPlayer) continue;
+            let openEndX, openEndY;
+            let fromPlayer = null;
             
-            const fromPlayerIndex = players.indexOf(fromPlayer);
-            const fromPos = getPlayerPosition(fromPlayer, fromPlayerIndex, players.length);
-            
-            // Berechne wo das offene Ende der Linie ist
-            // Verwende gespeicherte Position falls vorhanden, sonst default 20% nach rechts
-            const openEndX = card.openEndPosition?.x ?? (fromPos.x + 20);
-            const openEndY = card.openEndPosition?.y ?? fromPos.y;
+            if (card.fromPlayerId) {
+              // Verbindung mit Sender
+              fromPlayer = players.find(p => p.id === card.fromPlayerId);
+              if (!fromPlayer) continue;
+              
+              const fromPlayerIndex = players.indexOf(fromPlayer);
+              const fromPos = getPlayerPosition(fromPlayer, fromPlayerIndex, players.length);
+              
+              // Berechne wo das offene Ende der Linie ist
+              openEndX = card.openEndPosition?.x ?? (fromPos.x + 20);
+              openEndY = card.openEndPosition?.y ?? fromPos.y;
+            } else {
+              // Freie Verbindung ohne Sender - verwende gespeicherte Position oder Default
+              openEndX = card.openEndPosition?.x ?? 30;
+              openEndY = card.openEndPosition?.y ?? 30;
+            }
             
             // Prüfe Abstand zum offenen Ende
             const dx = dropX - openEndX;
@@ -1148,13 +1162,16 @@ const GameBoard: React.FC<GameBoardProps> = ({
             console.log('📏 Abstand zum offenen Ende:', distance, 'Position:', { dropX, dropY, openEndX, openEndY });
             
             if (distance < 8) { // 8% Radius für Snap
-              console.log('🔗 Spieler wird an offenes Ende angedockt', card.fromPlayerId, '→', player.name);
+              console.log('🔗 Spieler wird an offenes Ende angedockt', card.fromPlayerId || '(frei)', '→', player.name);
               
                 // Aktualisiere die Karte mit dem neuen Empfänger
                 if (onUpdateCard) {
+                  const newText = card.fromPlayerId && fromPlayer
+                    ? `Prozess: ${fromPlayer.name} → ${player.name}`
+                    : `Prozess → ${player.name}`;
                   onUpdateCard(card.id, {
                     toPlayerId: player.id,
-                    text: `Prozess: ${fromPlayer.name} → ${player.name}`
+                    text: newText
                   });
                 }              // Platziere Spieler in der Nähe des offenen Endes
               if (onUpdatePlayerPosition) {
@@ -1163,6 +1180,123 @@ const GameBoard: React.FC<GameBoardProps> = ({
               
               connectedToOpenEnd = true;
               break;
+            }
+          }
+          
+          // Prüfe auch ob Spieler auf den ANFANG einer Verbindung ohne Sender gezogen wird
+          if (!connectedToOpenEnd) {
+            const startlessConnections = cards.filter(card => !card.fromPlayerId && card.toPlayerId);
+            console.log('🔍 Verbindungen ohne Sender gefunden:', startlessConnections.length);
+            
+            for (const card of startlessConnections) {
+              // Position des Anfangs (wo normalerweise der Sender wäre)
+              const startX = card.openEndPosition?.x ?? 30;
+              const startY = card.openEndPosition?.y ?? 30;
+              
+              // Prüfe Abstand zum Anfang
+              const dx = dropX - startX;
+              const dy = dropY - startY;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              
+              console.log('📏 Abstand zum Start:', distance, 'Position:', { dropX, dropY, startX, startY });
+              
+              if (distance < 8) { // 8% Radius für Snap
+                const toPlayer = players.find(p => p.id === card.toPlayerId);
+                console.log('🔗 Spieler wird an Anfang angedockt', player.name, '→', toPlayer?.name);
+                
+                // Aktualisiere die Karte mit dem neuen Sender
+                if (onUpdateCard) {
+                  const newText = toPlayer
+                    ? `Prozess: ${player.name} → ${toPlayer.name}`
+                    : `Prozess von ${player.name}`;
+                  onUpdateCard(card.id, {
+                    fromPlayerId: player.id,
+                    playerId: player.id,
+                    playerName: player.name,
+                    text: newText
+                  });
+                }
+                
+                // Platziere Spieler in der Nähe des Anfangs
+                if (onUpdatePlayerPosition) {
+                  onUpdatePlayerPosition(currentDraggedPlayer, { x: startX, y: startY });
+                }
+                
+                connectedToOpenEnd = true;
+                break;
+              }
+            }
+          }
+          
+          // Prüfe auch ob Spieler auf Decision Box Ein-/Ausgänge gezogen wird
+          if (!connectedToOpenEnd) {
+            for (const decisionBox of decisionBoxes) {
+              // Prüfe Eingang (wenn kein fromPlayer)
+              if (!decisionBox.fromPlayerId) {
+                const inputX = decisionBox.position.x - 15;
+                const inputY = decisionBox.position.y;
+                
+                const dx = dropX - inputX;
+                const dy = dropY - inputY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < 8) {
+                  console.log('🔗 Spieler wird an Decision Box Eingang angedockt');
+                  
+                  // Aktualisiere Decision Box mit neuem Sender
+                  setDecisionBoxes(prev => prev.map(box => 
+                    box.id === decisionBox.id 
+                      ? { ...box, fromPlayerId: player.id }
+                      : box
+                  ));
+                  
+                  if (onUpdatePlayerPosition) {
+                    onUpdatePlayerPosition(currentDraggedPlayer, { x: inputX, y: inputY });
+                  }
+                  
+                  connectedToOpenEnd = true;
+                  break;
+                }
+              }
+              
+              // Prüfe Ausgänge (wenn kein toPlayer)
+              decisionBox.options.forEach((option, optionIndex) => {
+                if (!option.toPlayerId && !connectedToOpenEnd) {
+                  const angle = optionIndex * 60 - 30;
+                  const outputX = decisionBox.position.x + 15 * Math.cos(angle * Math.PI / 180);
+                  const outputY = decisionBox.position.y + 15 * Math.sin(angle * Math.PI / 180);
+                  
+                  const dx = dropX - outputX;
+                  const dy = dropY - outputY;
+                  const distance = Math.sqrt(dx * dx + dy * dy);
+                  
+                  if (distance < 8) {
+                    console.log('🔗 Spieler wird an Decision Box Ausgang angedockt');
+                    
+                    // Aktualisiere Decision Box Option mit neuem Empfänger
+                    setDecisionBoxes(prev => prev.map(box => 
+                      box.id === decisionBox.id 
+                        ? {
+                            ...box,
+                            options: box.options.map((opt, idx) =>
+                              idx === optionIndex
+                                ? { ...opt, toPlayerId: player.id }
+                                : opt
+                            )
+                          }
+                        : box
+                    ));
+                    
+                    if (onUpdatePlayerPosition) {
+                      onUpdatePlayerPosition(currentDraggedPlayer, { x: outputX, y: outputY });
+                    }
+                    
+                    connectedToOpenEnd = true;
+                  }
+                }
+              });
+              
+              if (connectedToOpenEnd) break;
             }
           }
           
@@ -2393,23 +2527,47 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 <div className="h-px bg-white/10 my-1 mx-3"></div>
                 <button
                   onClick={() => {
-                    openProcessModalWithAutoSender();
+                    if (onAddCard) {
+                      onAddCard(
+                        'Freier Prozess',
+                        '', // kein Sender
+                        '', // kein Empfänger
+                        '', // medium
+                        '', // duration
+                        '' // description
+                      );
+                    }
                     setShowDropdown(false);
                   }}
-                  disabled={players.filter(p => p.onBoard !== false).length < 2}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed group"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left group"
                 >
-                  <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center group-hover:bg-purple-500/30 transition-colors">
-                    <GitBranch className="w-5 h-5 text-purple-400" />
+                  <div className="w-10 h-10 bg-gray-500/20 rounded-lg flex items-center justify-center group-hover:bg-gray-500/30 transition-colors">
+                    <span className="text-lg">🔗</span>
                   </div>
                   <div>
-                    <div className="font-semibold text-white">Prozessschritt</div>
-                    <div className="text-xs text-gray-400">Neue Verbindung erstellen</div>
+                    <div className="font-semibold text-white">Freie Verbindung</div>
+                    <div className="text-xs text-gray-400">Ohne Sender und Empfänger</div>
                   </div>
                 </button>
               </div>
             )}
             </div>
+
+            {/* User Name Display - ganz rechts */}
+            {userName ? (
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/20 border border-indigo-400/30 rounded-xl">
+                <User className="w-4 h-4 text-indigo-400" />
+                <span className="text-sm font-medium text-white">{userName}</span>
+              </div>
+            ) : (
+              <button
+                onClick={onShowLogin}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all border text-sm font-medium bg-slate-700/50 hover:bg-slate-600/50 border-white/10 text-white"
+              >
+                <User className="w-4 h-4" />
+                <span>Anmelden</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -2598,10 +2756,11 @@ const GameBoard: React.FC<GameBoardProps> = ({
             {getConnections().map((conn) => {
               const fromPlayer = players.find(p => p.id === conn.from);
               
-              if (!fromPlayer) return null;
-              
-              const fromPlayerIndex = players.indexOf(fromPlayer);
-              const fromPlayerPos = getPlayerPosition(fromPlayer, fromPlayerIndex, players.length);
+              // Wenn kein Sender (freie Verbindung), verwende Standardposition
+              const fromPlayerIndex = fromPlayer ? players.indexOf(fromPlayer) : -1;
+              const fromPlayerPos = fromPlayer 
+                ? getPlayerPosition(fromPlayer, fromPlayerIndex, players.length)
+                : conn.cards[0]?.openEndPosition || { x: 30, y: 30 }; // Default Position links oben
               
               // Wenn kein Empfänger: zeichne Linie ins Leere (gleicher Stil wie normale Verbindung)
               if (!conn.to) {
@@ -2611,7 +2770,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   ? firstCard.openEndPosition 
                   : { x: fromPlayerPos.x + 20, y: fromPlayerPos.y };
                 
-                const startPort = getPlayerPortPosition(fromPlayerPos, toPos, true);
+                const startPort = fromPlayer 
+                  ? getPlayerPortPosition(fromPlayerPos, toPos, true)
+                  : fromPlayerPos;
                 const endPort = { x: toPos.x, y: toPos.y };
                 
                 // Gleiche Kurven-Berechnung wie bei normalen Verbindungen
@@ -2625,6 +2786,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 const path = `M ${startPort.x} ${startPort.y} Q ${controlX} ${controlY} ${endPort.x} ${endPort.y}`;
                 const isSelected = selectedConnection?.from === conn.from && !selectedConnection?.to;
                 const isHovered = hoveredConnection?.from === conn.from && !hoveredConnection?.to;
+                const lineColor = fromPlayer?.color || '#888888'; // Grau als Fallback
                 
                 return (
                   <g key={`${conn.from}-open`} style={{ pointerEvents: 'auto' }}>
@@ -2651,35 +2813,62 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     {/* Main connection line */}
                     <path
                       d={path}
-                      stroke={fromPlayer.color}
+                      stroke={lineColor}
                       strokeWidth={isSelected ? "1.2" : isHovered ? "1.0" : "0.6"}
                       fill="none"
                       opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
                       style={{ pointerEvents: 'none' }}
                     />
                     
-                    {/* Offener Kreis am Ende statt Pfeil */}
+                    {/* Offener Kreis am Ende statt Pfeil - ziehbar */}
                     <circle
                       cx={endPort.x}
                       cy={endPort.y}
-                      r="1.5"
-                      fill="none"
-                      stroke={fromPlayer.color}
-                      strokeWidth="0.4"
+                      r="2"
+                      fill={lineColor}
+                      stroke="white"
+                      strokeWidth="0.3"
                       opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
-                      style={{ pointerEvents: 'none' }}
+                      style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        console.log('🎯 Dragging open end of connection');
+                        setIsDraggingConnection(true);
+                        setDragConnectionFrom(conn.from);
+                      }}
                     />
+                    
+                    {/* Offener Kreis am Anfang - ziehbar (wenn kein fromPlayer) */}
+                    {!fromPlayer && (
+                      <circle
+                        cx={startPort.x}
+                        cy={startPort.y}
+                        r="2"
+                        fill={lineColor}
+                        stroke="white"
+                        strokeWidth="0.3"
+                        opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
+                        style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          console.log('🎯 Dragging start of free connection');
+                          // TODO: Implement dragging start point
+                        }}
+                      />
+                    )}
                   </g>
                 );
               }
               
               const toPlayer = players.find(p => p.id === conn.to);
               
-              if (!fromPlayer || !toPlayer) return null;
+              if (!toPlayer) return null;
               
-              const fromIndex = players.indexOf(fromPlayer);
+              const fromIndex = fromPlayer ? players.indexOf(fromPlayer) : -1;
               const toIndex = players.indexOf(toPlayer);
-              const fromPos = getPlayerPosition(fromPlayer, fromIndex, players.length);
+              const fromPos = fromPlayer 
+                ? getPlayerPosition(fromPlayer, fromIndex, players.length)
+                : { x: 30, y: 30 }; // Default Position für freie Verbindungen
               const toPos = getPlayerPosition(toPlayer, toIndex, players.length);
               
               // Get port positions (lines start/end at ports, not center)
@@ -2755,11 +2944,11 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   {/* Visible path */}
                   <path
                     d={path}
-                    stroke={fromPlayer.color}
+                    stroke={fromPlayer?.color || '#888888'}
                     strokeWidth={isSelected ? "0.8" : isHovered ? "0.7" : "0.5"}
                     fill="none"
                     opacity={isSelected ? "1" : isHovered ? "0.9" : "0.75"}
-                    markerEnd={`url(#arrowhead-${fromPlayer.id})`}
+                    markerEnd={fromPlayer ? `url(#arrowhead-${fromPlayer.id})` : undefined}
                     className="transition-all"
                     style={{
                       filter: isSelected 
@@ -2770,25 +2959,47 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       pointerEvents: 'none',
                     }}
                   />
+                  
+                  {/* Ziehbarer Start-Handle wenn kein fromPlayer */}
+                  {!fromPlayer && (
+                    <circle
+                      cx={startPort.x}
+                      cy={startPort.y}
+                      r="2"
+                      fill="#888888"
+                      stroke="white"
+                      strokeWidth="0.3"
+                      opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
+                      style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        console.log('🎯 Dragging start of connection to player');
+                        // Start dragging from this connection to connect to a player
+                        setIsDraggingConnection(true);
+                        setDragConnectionFrom(''); // Empty = looking for start player
+                        // Store which connection we're editing
+                        conn.cards.forEach(card => {
+                          (card as any)._editingStart = true;
+                        });
+                      }}
+                    />
+                  )}
                 </g>
               );
             })}
             
             {/* Decision box connections */}
             {decisionBoxes.map((decisionBox) => {
-              const fromPlayer = players.find(p => p.id === decisionBox.fromPlayerId);
-              if (!fromPlayer) return null;
+              const fromPlayer = decisionBox.fromPlayerId ? players.find(p => p.id === decisionBox.fromPlayerId) : null;
               
-              const fromIndex = players.indexOf(fromPlayer);
-              const fromPos = getPlayerPosition(fromPlayer, fromIndex, players.length);
               const boxPos = decisionBox.position;
               
-              // Line from player to decision box (straight line)
-              const lineToBox = (
+              // Line from player to decision box (if player exists)
+              const lineToBox = fromPlayer ? (
                 <g key={`line-to-${decisionBox.id}`}>
                   <line
-                    x1={fromPos.x}
-                    y1={fromPos.y}
+                    x1={getPlayerPosition(fromPlayer, players.indexOf(fromPlayer), players.length).x}
+                    y1={getPlayerPosition(fromPlayer, players.indexOf(fromPlayer), players.length).y}
                     x2={boxPos.x}
                     y2={boxPos.y}
                     stroke={fromPlayer.color}
@@ -2798,12 +3009,73 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     markerEnd={`url(#arrowhead-${fromPlayer.id})`}
                   />
                 </g>
+              ) : (
+                // Offenes Ende zum Decision Box (ziehbar)
+                <g key={`line-to-${decisionBox.id}`}>
+                  <line
+                    x1={boxPos.x - 15}
+                    y1={boxPos.y}
+                    x2={boxPos.x}
+                    y2={boxPos.y}
+                    stroke="#888888"
+                    strokeWidth="0.6"
+                    strokeDasharray="4,4"
+                    opacity="0.8"
+                  />
+                  <circle
+                    cx={boxPos.x - 15}
+                    cy={boxPos.y}
+                    r="2"
+                    fill="#888888"
+                    stroke="white"
+                    strokeWidth="0.3"
+                    style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      console.log('🎯 Dragging decision box input');
+                    }}
+                  />
+                </g>
               );
               
               // Lines from decision box to target players (curved only for back-connections)
               const linesToTargets = decisionBox.options.map((option, optionIndex) => {
-                const toPlayer = players.find(p => p.id === option.toPlayerId);
-                if (!toPlayer) return null;
+                const toPlayer = option.toPlayerId ? players.find(p => p.id === option.toPlayerId) : null;
+                
+                // Wenn kein Ziel-Spieler: zeichne offenes Ende
+                if (!toPlayer) {
+                  const angle = optionIndex * 60 - 30; // Verteile Ausgänge
+                  const endX = boxPos.x + 15 * Math.cos(angle * Math.PI / 180);
+                  const endY = boxPos.y + 15 * Math.sin(angle * Math.PI / 180);
+                  
+                  return (
+                    <g key={`line-from-${decisionBox.id}-option-${optionIndex}`}>
+                      <line
+                        x1={boxPos.x}
+                        y1={boxPos.y}
+                        x2={endX}
+                        y2={endY}
+                        stroke={option.color || '#888888'}
+                        strokeWidth="0.6"
+                        strokeDasharray="4,4"
+                        opacity="0.8"
+                      />
+                      <circle
+                        cx={endX}
+                        cy={endY}
+                        r="2"
+                        fill={option.color || '#888888'}
+                        stroke="white"
+                        strokeWidth="0.3"
+                        style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          console.log('🎯 Dragging decision box output');
+                        }}
+                      />
+                    </g>
+                  );
+                }
                 
                 const toIndex = players.indexOf(toPlayer);
                 const toPos = getPlayerPosition(toPlayer, toIndex, players.length);
@@ -2868,11 +3140,11 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     {/* Visible path */}
                     <path
                       d={path}
-                      stroke={fromPlayer.color}
+                      stroke={fromPlayer?.color || '#888888'}
                       strokeWidth={isHoveredDecision ? "0.7" : "0.6"}
                       fill="none"
                       opacity={isHoveredDecision ? "1" : "0.8"}
-                      markerEnd={`url(#arrowhead-${fromPlayer.id})`}
+                      markerEnd={fromPlayer ? `url(#arrowhead-${fromPlayer.id})` : 'url(#arrowhead-default)'}
                       className="transition-all"
                       style={{ 
                         pointerEvents: 'none',
@@ -3643,8 +3915,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
             
             {/* Decision Boxes */}
             {decisionBoxes.map((decisionBox) => {
-              const fromPlayer = players.find(p => p.id === decisionBox.fromPlayerId);
-              if (!fromPlayer) return null;
+              const fromPlayer = decisionBox.fromPlayerId ? players.find(p => p.id === decisionBox.fromPlayerId) : null;
               
               const isDraggingDecision = draggedPlayer === `decision-${decisionBox.id}`;
               
@@ -3660,13 +3931,23 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     pointerEvents: 'auto',
                     cursor: isDraggingDecision ? 'grabbing' : 'grab'
                   }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    handleMouseDown(e, `decision-${decisionBox.id}`);
-                  }}
                   onClick={(e) => {
+                    e.stopPropagation();
+                    
+                    // Wenn bereits am Ziehen: Platzieren an dieser Position
+                    if (isDraggingDecision) {
+                      setDraggedPlayer(null);
+                      console.log('📍 Decision Box platziert an', decisionBox.position);
+                    } else {
+                      // Sonst: Zum Ziehen aufnehmen
+                      setDraggedPlayer(`decision-${decisionBox.id}`);
+                      console.log('✊ Decision Box aufgenommen');
+                    }
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    // Nur öffnen wenn nicht am Ziehen
                     if (!isDraggingDecision) {
-                      e.stopPropagation();
                       setInspectedDecisionBox(decisionBox.id);
                     }
                   }}
@@ -3719,7 +4000,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                           <div 
                             className="px-2 py-1 rounded-full text-[10px] font-bold text-white shadow-md border border-white/30 whitespace-nowrap"
                             style={{
-                              backgroundColor: option.color || fromPlayer.color
+                              backgroundColor: option.color || fromPlayer?.color || '#888888'
                             }}
                           >
                             {option.label}
@@ -4720,6 +5001,23 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   players={players}
                   onAddCard={onAddCard}
                   onAddPlayer={onAddPlayer}
+                  onAddDecision={() => {
+                    const decisionId = `decision-${Date.now()}`;
+                    const centerX = 50;
+                    const centerY = 50;
+                    const newDecisionBox = {
+                      id: decisionId,
+                      question: 'Neue Entscheidung',
+                      fromPlayerId: '',
+                      options: [
+                        { label: 'Option 1', toPlayerId: '', description: '', color: '#10B981' },
+                        { label: 'Option 2', toPlayerId: '', description: '', color: '#F59E0B' }
+                      ],
+                      position: { x: centerX, y: centerY },
+                      type: 'binary' as const
+                    };
+                    setDecisionBoxes(prev => [...prev, newDecisionBox]);
+                  }}
                 />
               </div>
             </div>
