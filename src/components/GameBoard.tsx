@@ -238,13 +238,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
     return unsubscribe;
   }, [gameId]);
 
-  // Helper function to get the last recipient (for auto-selecting next sender)
-  const getLastRecipient = () => {
-    if (cards.length === 0) return null;
-    const sortedCards = [...cards].sort((a, b) => a.timestamp - b.timestamp);
-    return sortedCards[sortedCards.length - 1].toPlayerId;
-  };
-
   const handleAddPlayer = () => {
     if (currentName.trim() && currentRole.trim()) {
       const randomColor = PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
