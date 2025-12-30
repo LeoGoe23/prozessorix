@@ -1,6 +1,7 @@
 import React from 'react';
 import TopBar from './TopBar';
 import HeroSection from './HeroSection';
+import MehrwertSection from './sections/MehrwertSection';
 import FeaturesSection from './FeaturesSection';
 import DemoSectionInteractive from './DemoSectionInteractive';
 import Footer from './Footer';
@@ -35,6 +36,7 @@ const LandingPage: React.FC = () => {
 
       <TopBar />
       <HeroSection />
+      <MehrwertSection />
       <FeaturesSection />
       <DemoSectionInteractive />
       <Footer />

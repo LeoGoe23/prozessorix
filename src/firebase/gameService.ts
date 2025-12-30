@@ -13,7 +13,7 @@ import {
   getDoc
 } from 'firebase/firestore';
 import { db } from './config';
-import { Player, ProcessCard, ProcessObject } from '../types/game';
+import { Player, ProcessCard, ProcessObject, FreeLine, DecisionLine } from '../types/game';
 
 // Get the base URL - priority: Firebase Config > Environment Variable > Current Location
 let cachedBaseUrl: string | null = null;
@@ -312,6 +312,147 @@ export const subscribeToProcessObjects = (
       objects.push(baseObject as ProcessObject);
     });
     callback(objects);
+  });
+};
+
+// Add a free line
+export const addFreeLine = async (gameId: string, line: Omit<FreeLine, 'id' | 'timestamp'>) => {
+  const linesRef = collection(db, 'games', gameId, 'freeLines');
+  await addDoc(linesRef, {
+    ...line,
+    timestamp: Date.now(),
+    createdAt: serverTimestamp(),
+  });
+};
+
+// Update a free line
+export const updateFreeLine = async (
+  gameId: string, 
+  lineId: string, 
+  updates: Partial<FreeLine>
+) => {
+  const lineRef = doc(db, 'games', gameId, 'freeLines', lineId);
+  
+  // Konvertiere null Werte zu deleteField()
+  const cleanUpdates: any = { ...updates };
+  Object.keys(cleanUpdates).forEach(key => {
+    if (cleanUpdates[key] === undefined) {
+      delete cleanUpdates[key];
+    } else if (cleanUpdates[key] === null) {
+      cleanUpdates[key] = deleteField();
+    }
+  });
+  
+  await updateDoc(lineRef, {
+    ...cleanUpdates,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+// Remove a free line
+export const removeFreeLine = async (gameId: string, lineId: string) => {
+  const lineRef = doc(db, 'games', gameId, 'freeLines', lineId);
+  await deleteDoc(lineRef);
+};
+
+// Subscribe to free lines (real-time)
+export const subscribeToFreeLines = (
+  gameId: string,
+  callback: (lines: FreeLine[]) => void
+) => {
+  const linesRef = collection(db, 'games', gameId, 'freeLines');
+  const q = query(linesRef, orderBy('timestamp', 'asc'));
+  
+  return onSnapshot(q, (snapshot) => {
+    const lines: FreeLine[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      lines.push({
+        id: doc.id,
+        startPosition: data.startPosition || { x: 30, y: 30 },
+        endPosition: data.endPosition || { x: 70, y: 30 },
+        startPlayerId: data.startPlayerId,
+        endPlayerId: data.endPlayerId,
+        color: data.color || '#3B82F6',
+        thickness: data.thickness,
+        style: data.style,
+        timestamp: data.timestamp || Date.now(),
+      });
+    });
+    callback(lines);
+  });
+};
+
+// Add a decision line
+export const addDecisionLine = async (
+  gameId: string, 
+  line: Omit<DecisionLine, 'id' | 'timestamp'>
+) => {
+  const linesRef = collection(db, 'games', gameId, 'decisionLines');
+  await addDoc(linesRef, {
+    ...line,
+    timestamp: Date.now(),
+  });
+};
+
+// Update a decision line
+export const updateDecisionLine = async (
+  gameId: string, 
+  lineId: string, 
+  updates: Partial<DecisionLine>
+) => {
+  const lineRef = doc(db, 'games', gameId, 'decisionLines', lineId);
+  
+  const cleanUpdates: any = { ...updates };
+  Object.keys(cleanUpdates).forEach(key => {
+    if (cleanUpdates[key] === undefined) {
+      delete cleanUpdates[key];
+    } else if (cleanUpdates[key] === null) {
+      cleanUpdates[key] = deleteField();
+    }
+  });
+  
+  await updateDoc(lineRef, {
+    ...cleanUpdates,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+// Remove a decision line
+export const removeDecisionLine = async (gameId: string, lineId: string) => {
+  const lineRef = doc(db, 'games', gameId, 'decisionLines', lineId);
+  await deleteDoc(lineRef);
+};
+
+// Subscribe to decision lines (real-time)
+export const subscribeToDecisionLines = (
+  gameId: string,
+  callback: (lines: DecisionLine[]) => void
+) => {
+  const linesRef = collection(db, 'games', gameId, 'decisionLines');
+  const q = query(linesRef, orderBy('timestamp', 'asc'));
+  
+  return onSnapshot(q, (snapshot) => {
+    const lines: DecisionLine[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      lines.push({
+        id: doc.id,
+        startPosition: data.startPosition || { x: 30, y: 50 },
+        option1Position: data.option1Position || { x: 60, y: 35 },
+        option2Position: data.option2Position || { x: 60, y: 65 },
+        decisionBoxPosition: data.decisionBoxPosition || { x: 45, y: 50 },
+        startPlayerId: data.startPlayerId,
+        option1PlayerId: data.option1PlayerId,
+        option2PlayerId: data.option2PlayerId,
+        question: data.question,
+        option1Label: data.option1Label,
+        option2Label: data.option2Label,
+        color: data.color || '#F59E0B',
+        timestamp: data.timestamp || Date.now(),
+      });
+    });
+    callback(lines);
   });
 };
 

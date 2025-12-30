@@ -20,39 +20,15 @@ const HeroSection: React.FC = () => {
 
       <div className="relative max-w-6xl mx-auto text-center">
         {/* Logo/Title */}
-        <div className="mb-8 animate-fade-in">
-          <h1 className="text-7xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 mb-4">
+        <div className="mb-16 animate-fade-in">
+          <h1 className="text-7xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 mb-12">
             Prozessorix
           </h1>
-          <div className="flex items-center justify-center gap-3 text-2xl md:text-3xl font-semibold text-gray-700">
-            <span className="animate-bounce">🎯</span>
-            <span>Prozesse spielerisch visualisieren</span>
-            <span className="animate-bounce animation-delay-1000">🚀</span>
-          </div>
-        </div>
-
-        {/* Subtitle */}
-        <p className="text-xl md:text-2xl text-gray-600 mb-12 max-w-3xl mx-auto leading-relaxed animate-fade-in animation-delay-500">
-          Entdecke Workflows auf eine völlig neue Art! Mit Prozessorix machst du Abläufe 
-          sichtbar, verständlich und optimierbar – spielerisch und im Team.
-        </p>
-
-        {/* Key Benefits */}
-        <div className="grid md:grid-cols-3 gap-6 mb-12 max-w-4xl mx-auto animate-fade-in animation-delay-1000">
-          <div className="bg-white/70 backdrop-blur-sm p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all hover:scale-105">
-            <div className="text-4xl mb-3">👥</div>
-            <h3 className="font-bold text-lg mb-2 text-gray-800">Kollaborativ</h3>
-            <p className="text-gray-600 text-sm">Arbeitet gemeinsam in Echtzeit an euren Prozessen</p>
-          </div>
-          <div className="bg-white/70 backdrop-blur-sm p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all hover:scale-105">
-            <div className="text-4xl mb-3">🎨</div>
-            <h3 className="font-bold text-lg mb-2 text-gray-800">Intuitiv</h3>
-            <p className="text-gray-600 text-sm">Keine Vorkenntnisse nötig – einfach loslegen</p>
-          </div>
-          <div className="bg-white/70 backdrop-blur-sm p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all hover:scale-105">
-            <div className="text-4xl mb-3">⚡</div>
-            <h3 className="font-bold text-lg mb-2 text-gray-800">Schnell</h3>
-            <p className="text-gray-600 text-sm">Ergebnisse in Minuten statt Stunden</p>
+          <div className="space-y-4 text-3xl md:text-5xl font-bold text-gray-800">
+            <div className="animate-fade-in animation-delay-200">Prozesse spielerisch</div>
+            <div className="animate-fade-in animation-delay-400">Designen</div>
+            <div className="animate-fade-in animation-delay-600">Optimieren</div>
+            <div className="animate-fade-in animation-delay-800">Digitalisieren</div>
           </div>
         </div>
 

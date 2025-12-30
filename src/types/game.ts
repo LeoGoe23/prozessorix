@@ -47,6 +47,8 @@ export interface ProcessCard {
   isDecision?: boolean;  // Ist dies ein Entscheidungspunkt?
   decision?: Decision;   // Die Entscheidungsinformationen
   openEndPosition?: { x: number; y: number };  // Position des offenen Endes (in %) für unvollständige Verbindungen
+  curveOffset?: { x: number; y: number };  // Offset für die Kurve der Verbindung (in %) - verschiebt den Kontrollpunkt
+  connectionOffset?: { x: number; y: number };  // Offset für die gesamte Verbindung (in %) - verschiebt beide Endpunkte
 }
 
 // Process Object Types
@@ -107,6 +109,34 @@ export interface ProcessConnector {
   timestamp: number;
 }
 
+export interface FreeLine {
+  id: string;
+  startPosition: { x: number; y: number };  // Startpunkt in %
+  endPosition: { x: number; y: number };    // Endpunkt in %
+  startPlayerId?: string;  // Optional: An welchen Spieler ist der Start angedockt
+  endPlayerId?: string;    // Optional: An welchen Spieler ist das Ende angedockt
+  color: string;
+  thickness?: number;  // Dicke der Linie (1-5)
+  style?: 'solid' | 'dashed' | 'dotted';
+  timestamp: number;
+}
+
+export interface DecisionLine {
+  id: string;
+  startPosition: { x: number; y: number };    // Von wo kommt die Entscheidung
+  option1Position: { x: number; y: number };  // Erste Option
+  option2Position: { x: number; y: number };  // Zweite Option
+  startPlayerId?: string;    // Spieler am Start
+  option1PlayerId?: string;  // Spieler bei Option 1
+  option2PlayerId?: string;  // Spieler bei Option 2
+  decisionBoxPosition: { x: number; y: number };  // Position der Decision Box in der Mitte
+  question?: string;         // Die Entscheidungsfrage
+  option1Label?: string;     // Label für Option 1
+  option2Label?: string;     // Label für Option 2
+  color: string;
+  timestamp: number;
+}
+
 export type ProcessObject = ProcessStep | SystemTool | CommunicationMethod | ProcessConnector;
 
 export type GameBoardView = 'player-centric' | 'swimlane';
@@ -115,6 +145,8 @@ export interface GameState {
   players: Player[];
   cards: ProcessCard[];
   processObjects?: ProcessObject[];
+  freeLines?: FreeLine[];  // Freie Linien auf dem Spielfeld
+  decisionLines?: DecisionLine[];  // Entscheidungslinien auf dem Spielfeld
   currentPlayerIndex: number;
   currentRound: number;
   maxRounds: number;

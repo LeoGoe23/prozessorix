@@ -124,29 +124,26 @@ const HeroSection: React.FC = () => {
 
       <div className="relative z-10 w-full flex items-center">
         {/* Left Content - Text - mehr nach links */}
-        <div className="w-full lg:w-5/12 text-left space-y-8 animate-fade-in pl-8 lg:pl-16">
-          {/* Floating Badge */}
-          <div className="inline-flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-pink-500/20 backdrop-blur-lg rounded-full border border-white/30 shadow-lg">
-            <div className="w-2 h-2 bg-gradient-to-r from-green-400 to-emerald-400 rounded-full animate-pulse"></div>
-            <span className="text-sm text-white font-semibold tracking-wide">🚀 Die Zukunft der Prozessvisualisierung</span>
-          </div>
-
-          {/* Main Headline with neon effect */}
-          <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-white leading-tight tracking-tight">
-            <span className="block mb-3 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-              DIGITALISIERE.
+        <div className="w-full lg:w-5/12 text-left space-y-12 animate-fade-in pl-8 lg:pl-16">
+          {/* Main Headline with subtle gradients */}
+          <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold leading-tight tracking-tight">
+            <span className="block mb-2 text-indigo-300">
+              Prozesse spielerisch
             </span>
-            <span className="block mb-3 bg-gradient-to-r from-purple-400 via-pink-400 to-rose-400 bg-clip-text text-transparent">
-              OPTIMIERE.
+            <span className="block mb-2 text-purple-300">
+              Designen
             </span>
-            <span className="block bg-gradient-to-r from-pink-400 via-rose-400 to-orange-400 bg-clip-text text-transparent">
-              WACHSE.
+            <span className="block mb-2 text-pink-300">
+              Optimieren
+            </span>
+            <span className="block text-orange-300">
+              Digitalisieren
             </span>
           </h1>
 
           {/* Description with glow */}
-          <p className="text-xl md:text-2xl text-gray-300 leading-relaxed font-light max-w-xl">
-            Die führende Plattform für <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400 font-semibold">end-to-end Prozessdigitalisierung</span> und <span className="text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-400 font-semibold">Automatisierung</span>
+          <p className="text-lg md:text-xl text-gray-400 leading-relaxed font-light max-w-xl">
+            Die führende Plattform für <span className="text-cyan-400 font-medium">end-to-end Prozessdigitalisierung</span> und <span className="text-emerald-400 font-medium">Automatisierung</span>
           </p>
 
           {/* CTA Buttons */}

@@ -34,7 +34,8 @@ interface ProcessObjectToolboxProps {
     description?: string
   ) => void;
   onAddPlayer?: (player: Player) => void;
-  onAddDecision?: () => void;
+  onAddFreeLine?: (line: any) => void;
+  onAddDecisionLine?: (line: any) => void;
 }
 
 type ObjectCategory = 'process-step' | 'system-tool' | 'connector';
@@ -77,7 +78,8 @@ const ProcessObjectToolbox: React.FC<ProcessObjectToolboxProps> = ({
   players,
   onAddCard,
   onAddPlayer,
-  onAddDecision,
+  onAddFreeLine,
+  onAddDecisionLine,
 }) => {
   const [openCategory, setOpenCategory] = useState<ObjectCategory | null>(null);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
@@ -221,21 +223,31 @@ const ProcessObjectToolbox: React.FC<ProcessObjectToolboxProps> = ({
         <ProcessConnectorModal
           onClose={() => setShowConnectorModal(false)}
           onSelectProcessStep={() => {
-            if (onAddCard) {
-              onAddCard(
-                'Freier Prozess',
-                '', // kein Sender
-                '', // kein Empfänger
-                '', // medium
-                '', // duration
-                '' // description
-              );
+            if (onAddFreeLine) {
+              onAddFreeLine({
+                startPosition: { x: 30, y: 30 },
+                endPosition: { x: 70, y: 30 },
+                color: '#3B82F6',
+                thickness: 2,
+                style: 'solid'
+              });
             }
+            setShowConnectorModal(false);
           }}
           onSelectDecision={() => {
-            if (onAddDecision) {
-              onAddDecision();
+            if (onAddDecisionLine) {
+              onAddDecisionLine({
+                startPosition: { x: 30, y: 50 },
+                option1Position: { x: 60, y: 35 },
+                option2Position: { x: 60, y: 65 },
+                decisionBoxPosition: { x: 45, y: 50 },
+                question: 'Entscheidung?',
+                option1Label: 'Ja',
+                option2Label: 'Nein',
+                color: '#F59E0B'
+              });
             }
+            setShowConnectorModal(false);
           }}
         />
       )}

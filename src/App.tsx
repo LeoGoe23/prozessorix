@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import LandingPage from './landing/LandingPage';
 import GameBoard from './components/GameBoard';
 import PlayerView from './components/PlayerView';
-import { Player, ProcessCard, ProcessObject } from './types/game';
+import { Player, ProcessCard, ProcessObject, FreeLine, DecisionLine } from './types/game';
 import * as gameService from './firebase/gameService';
 
 const App: React.FC = () => {
@@ -11,11 +11,15 @@ const App: React.FC = () => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [cards, setCards] = useState<ProcessCard[]>([]);
   const [processObjects, setProcessObjects] = useState<ProcessObject[]>([]);
+  const [freeLines, setFreeLines] = useState<FreeLine[]>([]);
+  const [decisionLines, setDecisionLines] = useState<DecisionLine[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
   const [viewMode, setViewMode] = useState<'master' | 'player'>('master');
   const [userName, setUserName] = useState<string>('');
   const [userEmail, setUserEmail] = useState<string>('');
   const [userPassword, setUserPassword] = useState<string>('');
+  const [userCompany, setUserCompany] = useState<string>('');
+  const [userProcess, setUserProcess] = useState<string>('');
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
 
   // Initialize: Check URL - Landing Page or Game
@@ -138,11 +142,23 @@ const App: React.FC = () => {
       }
     });
 
+    // Subscribe to free lines
+    const unsubscribeLines = gameService.subscribeToFreeLines(gameId, (updatedLines) => {
+      setFreeLines(updatedLines);
+    });
+
+    // Subscribe to decision lines
+    const unsubscribeDecisionLines = gameService.subscribeToDecisionLines(gameId, (updatedLines) => {
+      setDecisionLines(updatedLines);
+    });
+
     // Cleanup subscriptions
     return () => {
       unsubscribePlayers();
       unsubscribeSteps();
       unsubscribeObjects();
+      unsubscribeLines();
+      unsubscribeDecisionLines();
     };
   }, [gameId]);
 
@@ -168,13 +184,70 @@ const App: React.FC = () => {
   const updatePlayerPosition = async (playerId: string, position: { x: number; y: number }) => {
     if (!gameId) return;
     
-    // Wenn ein Spieler bewegt wird und noch nicht onBoard ist, setze onBoard auf true
     const player = players.find(p => p.id === playerId);
+    console.log('🔵🔵🔵 UPDATE PLAYER POS:', player?.name, position);
+    
+    // Wenn ein Spieler bewegt wird und noch nicht onBoard ist, setze onBoard auf true
     if (player && player.onBoard === false) {
       // Aktualisiere sowohl Position als auch onBoard Status
       await gameService.updatePlayerPosition(gameId, playerId, position, true);
     } else {
       await gameService.updatePlayerPosition(gameId, playerId, position);
+    }
+    
+    // Aktualisiere alle angedockten freien Linien
+    const linesToUpdate = freeLines.filter(line => 
+      line.startPlayerId === playerId || line.endPlayerId === playerId
+    );
+    
+    if (linesToUpdate.length > 0) {
+      console.log('🔵🔵🔵 DOCKED LINES FOUND:', linesToUpdate.length);
+      
+      for (const line of linesToUpdate) {
+        const updates: Partial<FreeLine> = {};
+        
+        if (line.startPlayerId === playerId) {
+          updates.startPosition = position;
+        }
+        if (line.endPlayerId === playerId) {
+          updates.endPosition = position;
+        }
+        
+        if (Object.keys(updates).length > 0) {
+          console.log('🔵🔵🔵 UPDATING LINE:', line.id, updates);
+          await gameService.updateFreeLine(gameId, line.id, updates);
+        }
+      }
+    }
+    
+    // Aktualisiere alle angedockten Decision Lines
+    const decisionLinesToUpdate = decisionLines.filter(line => 
+      line.startPlayerId === playerId || 
+      line.option1PlayerId === playerId || 
+      line.option2PlayerId === playerId
+    );
+    
+    if (decisionLinesToUpdate.length > 0) {
+      console.log('🔵🔵🔵 DOCKED DECISION LINES FOUND:', decisionLinesToUpdate.length);
+      
+      for (const line of decisionLinesToUpdate) {
+        const updates: Partial<DecisionLine> = {};
+        
+        if (line.startPlayerId === playerId) {
+          updates.startPosition = position;
+        }
+        if (line.option1PlayerId === playerId) {
+          updates.option1Position = position;
+        }
+        if (line.option2PlayerId === playerId) {
+          updates.option2Position = position;
+        }
+        
+        if (Object.keys(updates).length > 0) {
+          console.log('🔵🔵🔵 UPDATING DECISION LINE:', line.id, updates);
+          await gameService.updateDecisionLine(gameId, line.id, updates);
+        }
+      }
     }
   };
 
@@ -234,6 +307,36 @@ const App: React.FC = () => {
   const updateProcessObject = async (objectId: string, updates: Partial<ProcessObject>) => {
     if (!gameId) return;
     await gameService.updateProcessObject(gameId, objectId, updates);
+  };
+
+  const addFreeLine = async (line: Omit<FreeLine, 'id' | 'timestamp'>) => {
+    if (!gameId) return;
+    await gameService.addFreeLine(gameId, line);
+  };
+
+  const updateFreeLine = async (lineId: string, updates: Partial<FreeLine>) => {
+    if (!gameId) return;
+    await gameService.updateFreeLine(gameId, lineId, updates);
+  };
+
+  const removeFreeLine = async (lineId: string) => {
+    if (!gameId) return;
+    await gameService.removeFreeLine(gameId, lineId);
+  };
+
+  const addDecisionLine = async (line: Omit<DecisionLine, 'id' | 'timestamp'>) => {
+    if (!gameId) return;
+    await gameService.addDecisionLine(gameId, line);
+  };
+
+  const updateDecisionLine = async (lineId: string, updates: Partial<DecisionLine>) => {
+    if (!gameId) return;
+    await gameService.updateDecisionLine(gameId, lineId, updates);
+  };
+
+  const removeDecisionLine = async (lineId: string) => {
+    if (!gameId) return;
+    await gameService.removeDecisionLine(gameId, lineId);
   };
 
   const updateCard = async (cardId: string, updates: Partial<ProcessCard>) => {
@@ -340,6 +443,8 @@ const App: React.FC = () => {
         players={players}
         cards={cards}
         processObjects={processObjects}
+        freeLines={freeLines}
+        decisionLines={decisionLines}
         currentPlayerIndex={0}
         currentRound={1}
         maxRounds={999}
@@ -356,6 +461,12 @@ const App: React.FC = () => {
         onAddProcessObject={addProcessObject}
         onRemoveProcessObject={removeProcessObject}
         onUpdateProcessObject={updateProcessObject}
+        onAddFreeLine={addFreeLine}
+        onUpdateFreeLine={updateFreeLine}
+        onRemoveFreeLine={removeFreeLine}
+        onAddDecisionLine={addDecisionLine}
+        onUpdateDecisionLine={updateDecisionLine}
+        onRemoveDecisionLine={removeDecisionLine}
         gameId={gameId}
         userName={userName}
         onShowLogin={() => setShowLoginModal(true)}
@@ -392,6 +503,38 @@ const App: React.FC = () => {
                   type="email"
                   value={userEmail}
                   onChange={(e) => setUserEmail(e.target.value)}
+                  placeholder="deine@email.de"
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                      setShowLoginModal(false);
+                    }
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Firma</label>
+                <input
+                  type="text"
+                  value={userCompany}
+                  onChange={(e) => setUserCompany(e.target.value)}
+                  placeholder="Dein Name"
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                      setShowLoginModal(false);
+                    }
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Prozess</label>
+                <input
+                  type="text"
+                  value={userProcess}
+                  onChange={(e) => setUserProcess(e.target.value)}
                   placeholder="deine@email.de"
                   className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
                   onKeyDown={(e) => {

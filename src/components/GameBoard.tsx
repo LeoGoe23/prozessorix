@@ -1,5 +1,5 @@
 import React from 'react';
-import { Player, ProcessCard, ProcessObject, ProcessStep, PLAYER_COLORS, DEFAULT_ROLES, PLAYER_ICONS, GameBoardView, DECISION_ICONS } from '../types/game';
+import { Player, ProcessCard, ProcessObject, ProcessStep, PLAYER_COLORS, DEFAULT_ROLES, PLAYER_ICONS, GameBoardView, DECISION_ICONS, FreeLine, DecisionLine } from '../types/game';
 import { Users, Plus, Trash2, ChevronDown, UserPlus, GitBranch, X, Share2, User, Settings, LayoutGrid, Copy } from 'lucide-react';
 import ShareGameModal from './ShareGameModal';
 import IconPicker from './IconPicker';
@@ -10,6 +10,8 @@ interface GameBoardProps {
   players: Player[];
   cards: ProcessCard[];
   processObjects: ProcessObject[];
+  freeLines: FreeLine[];  // Freie Linien
+  decisionLines: DecisionLine[];  // Entscheidungslinien
   currentPlayerIndex: number;
   currentRound: number;
   maxRounds: number;
@@ -26,6 +28,12 @@ interface GameBoardProps {
   onAddProcessObject: (object: Omit<ProcessObject, 'id' | 'timestamp'>) => void;
   onRemoveProcessObject: (objectId: string) => void;
   onUpdateProcessObject?: (objectId: string, updates: Partial<ProcessObject>) => void;
+  onAddFreeLine: (line: Omit<FreeLine, 'id' | 'timestamp'>) => void;
+  onUpdateFreeLine: (lineId: string, updates: Partial<FreeLine>) => void;
+  onRemoveFreeLine: (lineId: string) => void;
+  onAddDecisionLine: (line: Omit<DecisionLine, 'id' | 'timestamp'>) => void;
+  onUpdateDecisionLine: (lineId: string, updates: Partial<DecisionLine>) => void;
+  onRemoveDecisionLine: (lineId: string) => void;
   gameId?: string;
   userName?: string;
   onShowLogin?: () => void;
@@ -35,6 +43,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
   players,
   cards,
   processObjects,
+  freeLines,
+  decisionLines,
   onAddCard,
   onUpdateCard,
   onRemoveCard,
@@ -44,6 +54,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
   onAddProcessObject,
   onRemoveProcessObject,
   onUpdateProcessObject,
+  onAddFreeLine,
+  onUpdateFreeLine,
+  onRemoveFreeLine,
+  onAddDecisionLine,
+  onUpdateDecisionLine,
+  onRemoveDecisionLine,
   gameId,
   userName,
   onShowLogin,
@@ -79,6 +95,23 @@ const GameBoard: React.FC<GameBoardProps> = ({
   
   // Placed communication objects on field
   const [placedCommObjects, setPlacedCommObjects] = React.useState<Array<{ objectId: string; x: number; y: number }>>([]);
+  const [draggedCommObject, setDraggedCommObject] = React.useState<number | null>(null);
+  
+  // Dragging entire connections (process cards)
+  const [draggedConnectionState, setDraggedConnectionState] = React.useState<{ from: string; to: string | null } | null>(null);
+  
+  // Wrapper function that keeps ref in sync
+  const setDraggedConnection = React.useCallback((value: { from: string; to: string | null } | null) => {
+    console.log('🔄 setDraggedConnection called with:', value);
+    setDraggedConnectionState(value);
+    draggedConnectionRef.current = value;
+    console.log('✅ Both state and ref updated. Ref is now:', draggedConnectionRef.current);
+  }, []);
+  
+  const draggedConnection = draggedConnectionState;
+  
+  const [connectionDragStart, setConnectionDragStart] = React.useState<{ x: number; y: number } | null>(null);
+  const [connectionDragOffset, setConnectionDragOffset] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
   
   // Process Step Detail View
   const [selectedConnection, setSelectedConnection] = React.useState<{ from: string; to?: string } | null>(null);
@@ -106,6 +139,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
   
   // Drag preview position for waiting area players
   const [dragPreviewPosition, setDragPreviewPosition] = React.useState<{ x: number; y: number } | null>(null);
+  
+  // State for free line middle drag
+  const [freeLineMiddleDragOffset, setFreeLineMiddleDragOffset] = React.useState<{ offsetX: number; offsetY: number } | null>(null);
+  
+  // State for snap target highlighting
+  const [snapTargetPlayerId, setSnapTargetPlayerId] = React.useState<string | null>(null);
   
   // State for expanding/collapsing the bottom panel
   const [isBottomPanelExpanded, setIsBottomPanelExpanded] = React.useState(true);
@@ -143,12 +182,15 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [connectionMenuPosition, _setConnectionMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [connectionMenuTarget, setConnectionMenuTarget] = React.useState<string | null>(null);
   
+  // State for dragging open connection ends
+  const [draggedConnectionEnd, setDraggedConnectionEnd] = React.useState<{ cardId: string; isStart: boolean } | null>(null);
+  
   // View mode state
   const [viewMode, setViewMode] = React.useState<GameBoardView>('player-centric');
   
   // Management menu state
   const [showManagementMenu, setShowManagementMenu] = React.useState(false);
-  const [saveName, setSaveName] = React.useState('');
+  const [companyName, setCompanyName] = React.useState('');
   const [saveMessage, setSaveMessage] = React.useState('');
   const [gameVersions, setGameVersions] = React.useState<Array<{ id: string, name: string, timestamp: any }>>([]);
   const [showVersions, setShowVersions] = React.useState(false);
@@ -169,10 +211,54 @@ const GameBoard: React.FC<GameBoardProps> = ({
     id: string;
     question: string;
     fromPlayerId: string;
+    dockedToPlayerId?: string;  // Optional: Ist die Box an einen Spieler angedockt?
     options: Array<{ label: string; toPlayerId: string; description?: string; color?: string }>;
     position: { x: number; y: number };
     type: 'binary' | 'multiple';
   }>>([]);
+
+  // Ref to always have current players array (for closures in event listeners)
+  const playersRef = React.useRef(players);
+  React.useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+  
+  // Effect: Aktualisiere angedockte Decision Boxes wenn Spieler bewegt werden
+  React.useEffect(() => {
+    setDecisionBoxes(prev => prev.map(box => {
+      if (!box.dockedToPlayerId) return box;
+      
+      const dockedPlayer = players.find(p => p.id === box.dockedToPlayerId);
+      if (!dockedPlayer?.position) return box;
+      
+      // Aktualisiere Position zur Spieler-Position
+      return {
+        ...box,
+        position: { x: dockedPlayer.position.x, y: dockedPlayer.position.y }
+      };
+    }));
+  }, [players]); // Triggert wenn players sich ändern (z.B. Position-Updates)
+
+  // Refs for connection dragging - managed manually, NOT synced with state automatically
+  // This prevents race conditions where state updates clear the ref before mouseUp
+  const draggedConnectionRef = React.useRef<{from: string; to: string | null} | null>(null);
+  const connectionDragStartRef = React.useRef<{x: number; y: number} | null>(null);
+  const connectionDragOffsetRef = React.useRef<{x: number; y: number}>({ x: 0, y: 0 });
+  const cardsRef = React.useRef(cards); // Keep current cards in ref for closure
+  
+  // Update cardsRef when cards change
+  React.useEffect(() => {
+    cardsRef.current = cards;
+  }, [cards]);
+  
+  // CRITICAL: Sync draggedConnectionRef when draggedConnection state changes
+  // This ensures the ref is always in sync, regardless of how the state is set
+  React.useEffect(() => {
+    if (draggedConnection) {
+      draggedConnectionRef.current = draggedConnection;
+      console.log('🔄 Syncing ref from state:', draggedConnection);
+    }
+  }, [draggedConnection]);
 
   // Keyboard event handler für Delete/Backspace auf ausgewählten Connections
   React.useEffect(() => {
@@ -237,6 +323,132 @@ const GameBoard: React.FC<GameBoardProps> = ({
     
     return unsubscribe;
   }, [gameId]);
+
+  // Global MouseMove/MouseUp for connection dragging
+  // Move entire connection (both endpoints) smoothly
+  React.useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      const currentDraggedConnection = draggedConnectionRef.current;
+      if (!currentDraggedConnection || !gameBoardRef.current) return;
+      
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+
+      // Calculate offset from drag start using ref
+      const dragStart = connectionDragStartRef.current;
+      if (dragStart) {
+        const offsetX = mouseX - dragStart.x;
+        const offsetY = mouseY - dragStart.y;
+        
+        setConnectionDragOffset({ x: offsetX, y: offsetY });
+        connectionDragOffsetRef.current = { x: offsetX, y: offsetY }; // Update ref!
+      }
+      
+      document.body.style.cursor = 'grabbing';
+    };
+
+    const handleGlobalMouseUp = () => {
+      console.log('🎯 Global mouseUp handler triggered!');
+      const currentDraggedConnection = draggedConnectionRef.current;
+      const currentDragOffset = connectionDragOffsetRef.current;
+      const currentDragStart = connectionDragStartRef.current;
+      
+      console.log('🔍 draggedConnectionRef.current:', currentDraggedConnection);
+      console.log('🔍 connectionDragOffsetRef.current:', currentDragOffset);
+      console.log('🔍 connectionDragStartRef.current:', currentDragStart);
+      
+      // If draggedConnection is null but we have offset and dragStart, something went wrong
+      // Try to recover by finding which connection was being dragged
+      if (!currentDraggedConnection && currentDragOffset && currentDragStart && 
+          (currentDragOffset.x !== 0 || currentDragOffset.y !== 0)) {
+        console.log('⚠️ draggedConnection is null but we have offset - trying to recover');
+        console.log('🔍 Checking all connections to find the one being dragged...');
+        
+        // We can't reliably recover without knowing which connection was dragged
+        // Reset and warn user
+        console.error('❌ Cannot save - draggedConnection was lost!');
+        setConnectionDragOffset({ x: 0, y: 0 });
+        setConnectionDragStart(null);
+        document.body.style.cursor = '';
+        return;
+      }
+      
+      if (!currentDraggedConnection) {
+        console.log('⚠️ No dragged connection - exiting early');
+        return;
+      }
+      
+      console.log(`🌍 Global mouseUp - connection moved by (${currentDragOffset.x.toFixed(2)}, ${currentDragOffset.y.toFixed(2)})`);
+      
+      // Save the offset permanently to Firebase
+      if (currentDragOffset.x !== 0 || currentDragOffset.y !== 0) {
+        const currentCards = cardsRef.current; // Use ref to get current cards
+        console.log('💾 Attempting to save. Cards count:', currentCards.length);
+        console.log('💾 Looking for: from=' + JSON.stringify(currentDraggedConnection.from) + ' to=' + JSON.stringify(currentDraggedConnection.to));
+        
+        // Find cards directly
+        const matchingCards = currentCards.filter(card => {
+          const fromMatch = (card.fromPlayerId || '') === (currentDraggedConnection.from || '');
+          const toMatch = (card.toPlayerId || '') === (currentDraggedConnection.to || '');
+          console.log(`  Card ${card.id}: from="${card.fromPlayerId}" to="${card.toPlayerId}" - fromMatch=${fromMatch} toMatch=${toMatch}`);
+          return fromMatch && toMatch;
+        });
+        
+        console.log('✅ Found', matchingCards.length, 'matching cards');
+        
+        if (matchingCards.length > 0 && onUpdateCard) {
+          matchingCards.forEach(card => {
+            // Save the accumulated offset
+            const currentOffset = card.connectionOffset || { x: 0, y: 0 };
+            const newOffset = {
+              x: currentOffset.x + currentDragOffset.x,
+              y: currentOffset.y + currentDragOffset.y
+            };
+            console.log(`💾 Saving card ${card.id}: offset (${currentOffset.x.toFixed(2)},${currentOffset.y.toFixed(2)}) + drag (${currentDragOffset.x.toFixed(2)},${currentDragOffset.y.toFixed(2)}) = new (${newOffset.x.toFixed(2)},${newOffset.y.toFixed(2)})`);
+            onUpdateCard(card.id, {
+              connectionOffset: newOffset
+            });
+          });
+        } else {
+          console.log('❌ Cannot save - matchingCards:', matchingCards.length, 'onUpdateCard:', !!onUpdateCard);
+        }
+      }
+      
+      // Reset drag state - keep offset briefly to prevent jump
+      setDraggedConnection(null);
+      setConnectionDragStart(null);
+      // Clear refs manually
+      draggedConnectionRef.current = null;
+      connectionDragStartRef.current = null;
+      // Don't reset offset immediately - let Firebase update propagate first
+      setTimeout(() => {
+        setConnectionDragOffset({ x: 0, y: 0 });
+        connectionDragOffsetRef.current = { x: 0, y: 0 };
+      }, 100);
+      document.body.style.cursor = '';
+    };
+    
+    // Handle click to end drag (same as mouseUp)
+    const handleGlobalClick = () => {
+      const currentDraggedConnection = draggedConnectionRef.current;
+      if (currentDraggedConnection) {
+        console.log('🖱️ Click detected - ending connection drag');
+        handleGlobalMouseUp();
+      }
+    };
+
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('click', handleGlobalClick);
+
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('click', handleGlobalClick);
+      document.body.style.cursor = '';
+    };
+  }, []); // Empty dependency array - handlers use refs
 
   const handleAddPlayer = () => {
     if (currentName.trim() && currentRole.trim()) {
@@ -1025,7 +1237,363 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if ((!draggedPlayer && !draggedProcessStep) || !gameBoardRef.current) return;
+    if ((!draggedPlayer && !draggedProcessStep && !draggedConnectionEnd && draggedCommObject === null && !draggedConnection) || !gameBoardRef.current) return;
+    
+    console.log('🔴 handleMouseMove - players.length:', players.length);
+    
+    // Ziehe gesamte Verbindung
+    if (draggedConnection) {
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      console.log('🎯 Dragging connection, mouse:', { mouseX, mouseY });
+      console.log('🎯 Looking for:', draggedConnection);
+      
+      // Finde die Verbindung
+      const allConnections = getConnections();
+      console.log('🌐 All connections:', allConnections.map(c => ({ from: c.from, to: c.to, cardCount: c.cards.length })));
+      
+      const conn = allConnections.find(c => 
+        c.from === draggedConnection.from && 
+        (c.to === draggedConnection.to || (!c.to && !draggedConnection.to))
+      );
+      
+      console.log('🔍 Found connection:', conn);
+      
+      if (conn && conn.cards.length > 0 && onUpdateCard) {
+        console.log('🔑 Connection IDs:', { from: conn.from, to: conn.to });
+        console.log('🔑 Available player IDs:', players.map(p => p.id));
+        
+        // Berechne ursprünglichen Kontrollpunkt OHNE Offset
+        const fromPlayer = players.find(p => p.id === conn.from);
+        const toPlayer = conn.to ? players.find(p => p.id === conn.to) : null;
+        
+        console.log('👥 Players:', { fromPlayer: fromPlayer?.name, toPlayer: toPlayer?.name, hasFrom: !!fromPlayer, hasTo: !!toPlayer, connTo: conn.to });
+        
+        console.log('🔍 Checking condition:', { 
+          hasFromPlayer: !!fromPlayer, 
+          hasToPlayerOrNoTo: !!(toPlayer || !conn.to),
+          willProceed: !!(fromPlayer && (toPlayer || !conn.to))
+        });
+        
+        if (fromPlayer && (toPlayer || !conn.to)) {
+          console.log('✅ Condition passed, calculating positions...');
+          const fromIndex = players.indexOf(fromPlayer);
+          const fromPos = getPlayerPosition(fromPlayer, fromIndex, players.length);
+          
+          let toPos;
+          if (toPlayer) {
+            const toIndex = players.indexOf(toPlayer);
+            toPos = getPlayerPosition(toPlayer, toIndex, players.length);
+          } else {
+            // Für freie Verbindungen
+            const firstCard = conn.cards[0];
+            toPos = firstCard.openEndPosition || { x: fromPos.x + 20, y: fromPos.y };
+          }
+          
+          const { controlX: originalControlX, controlY: originalControlY } = calculateCurveControlPoint(
+            fromPos,
+            toPos,
+            conn.from,
+            conn.to || 'open-end'
+          );
+          
+          console.log('📐 Control point:', { originalControlX, originalControlY });
+          
+          // Berechne neues Offset
+          const newOffsetX = mouseX - originalControlX;
+          const newOffsetY = mouseY - originalControlY;
+          
+          console.log('📊 New offset:', { newOffsetX, newOffsetY });
+          
+          // Update alle Cards dieser Verbindung
+          conn.cards.forEach(card => {
+            console.log('💾 Updating card:', card.id);
+            onUpdateCard(card.id, {
+              curveOffset: { x: newOffsetX, y: newOffsetY }
+            });
+          });
+        }
+      }
+      return;
+    }
+    
+    // Ziehe Kommunikationsobjekt
+    if (draggedCommObject !== null) {
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      setPlacedCommObjects(prev => prev.map((obj, idx) => 
+        idx === draggedCommObject 
+          ? { ...obj, x: clampedX, y: clampedY }
+          : obj
+      ));
+      return;
+    }
+    
+    // Ziehe offenes Verbindungsende
+    if (draggedConnectionEnd) {
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      // Aktualisiere die openEndPosition der Card
+      if (onUpdateCard) {
+        onUpdateCard(draggedConnectionEnd.cardId, {
+          openEndPosition: { x: clampedX, y: clampedY }
+        });
+      }
+      return;
+    }
+    
+    // Check if dragging a free line middle (entire line)
+    if (draggedPlayer && draggedPlayer.startsWith('freeline-middle-')) {
+      const lineId = draggedPlayer.replace('freeline-middle-', '');
+      const line = freeLines.find(l => l.id === lineId);
+      if (!line) return;
+      
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      // Beim ersten Move: Offset berechnen
+      if (!freeLineMiddleDragOffset) {
+        const midX = (line.startPosition.x + line.endPosition.x) / 2;
+        const midY = (line.startPosition.y + line.endPosition.y) / 2;
+        setFreeLineMiddleDragOffset({
+          offsetX: mouseX - midX,
+          offsetY: mouseY - midY
+        });
+        return;
+      }
+      
+      // Mit Offset: Neue Position berechnen
+      const newMidX = mouseX - freeLineMiddleDragOffset.offsetX;
+      const newMidY = mouseY - freeLineMiddleDragOffset.offsetY;
+      
+      // Delta von alter zu neuer Mitte
+      const oldMidX = (line.startPosition.x + line.endPosition.x) / 2;
+      const oldMidY = (line.startPosition.y + line.endPosition.y) / 2;
+      const deltaX = newMidX - oldMidX;
+      const deltaY = newMidY - oldMidY;
+      
+      // Beide Endpunkte um Delta verschieben
+      const newStartX = Math.max(8, Math.min(92, line.startPosition.x + deltaX));
+      const newStartY = Math.max(8, Math.min(92, line.startPosition.y + deltaY));
+      const newEndX = Math.max(8, Math.min(92, line.endPosition.x + deltaX));
+      const newEndY = Math.max(8, Math.min(92, line.endPosition.y + deltaY));
+      
+      // Check for nearby players for start and end points (in pixel space)
+      const mousePixelX = e.clientX;
+      const mousePixelY = e.clientY;
+      
+      const startPixelX = (newStartX / 100) * boardRect.width + boardRect.left;
+      const startPixelY = (newStartY / 100) * boardRect.height + boardRect.top;
+      const endPixelX = (newEndX / 100) * boardRect.width + boardRect.left;
+      const endPixelY = (newEndY / 100) * boardRect.height + boardRect.top;
+      
+      // Check for snap at start point
+      const nearbyPlayerStart = players.find(player => {
+        if (!player.position || player.onBoard === false) return false;
+        const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+        const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+        const distance = Math.sqrt(Math.pow(startPixelX - playerX, 2) + Math.pow(startPixelY - playerY, 2));
+        return distance < 80;
+      });
+      
+      // Check for snap at end point
+      const nearbyPlayerEnd = players.find(player => {
+        if (!player.position || player.onBoard === false) return false;
+        const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+        const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+        const distance = Math.sqrt(Math.pow(endPixelX - playerX, 2) + Math.pow(endPixelY - playerY, 2));
+        return distance < 80;
+      });
+      
+      // Highlight both if found
+      if (nearbyPlayerStart || nearbyPlayerEnd) {
+        setSnapTargetPlayerId(nearbyPlayerStart?.id || nearbyPlayerEnd?.id || null);
+      } else {
+        setSnapTargetPlayerId(null);
+      }
+      
+      onUpdateFreeLine(lineId, {
+        startPosition: { x: newStartX, y: newStartY },
+        endPosition: { x: newEndX, y: newEndY }
+      });
+      return;
+    }
+    
+    // Check if dragging a free line start point
+    if (draggedPlayer && draggedPlayer.startsWith('freeline-start-')) {
+      const lineId = draggedPlayer.replace('freeline-start-', '');
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      // Check for nearby player to highlight
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+      const nearbyPlayer = players.find(player => {
+        if (!player.position || player.onBoard === false) return false;
+        const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+        const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+        const distance = Math.sqrt(Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2));
+        return distance < 80;
+      });
+      setSnapTargetPlayerId(nearbyPlayer?.id || null);
+      
+      onUpdateFreeLine(lineId, {
+        startPosition: { x: clampedX, y: clampedY }
+      });
+      return;
+    }
+    
+    // Check if dragging a decision line box
+    if (draggedPlayer && draggedPlayer.startsWith('decisionline-box-')) {
+      const lineId = draggedPlayer.replace('decisionline-box-', '');
+      const line = decisionLines.find(l => l.id === lineId);
+      if (!line) return;
+      
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      // Calculate the offset from the old position
+      const deltaX = clampedX - line.decisionBoxPosition.x;
+      const deltaY = clampedY - line.decisionBoxPosition.y;
+      
+      // Move all endpoints along with the box
+      onUpdateDecisionLine(lineId, {
+        decisionBoxPosition: { x: clampedX, y: clampedY },
+        startPosition: { 
+          x: Math.max(8, Math.min(92, line.startPosition.x + deltaX)), 
+          y: Math.max(8, Math.min(92, line.startPosition.y + deltaY))
+        },
+        option1Position: { 
+          x: Math.max(8, Math.min(92, line.option1Position.x + deltaX)), 
+          y: Math.max(8, Math.min(92, line.option1Position.y + deltaY))
+        },
+        option2Position: { 
+          x: Math.max(8, Math.min(92, line.option2Position.x + deltaX)), 
+          y: Math.max(8, Math.min(92, line.option2Position.y + deltaY))
+        }
+      });
+      return;
+    }
+    
+    // Check if dragging a decision line start point
+    if (draggedPlayer && draggedPlayer.startsWith('decisionline-start-')) {
+      const lineId = draggedPlayer.replace('decisionline-start-', '');
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      onUpdateDecisionLine(lineId, {
+        startPosition: { x: clampedX, y: clampedY }
+      });
+      return;
+    }
+    
+    // Check if dragging a decision line option1 point
+    if (draggedPlayer && draggedPlayer.startsWith('decisionline-option1-')) {
+      const lineId = draggedPlayer.replace('decisionline-option1-', '');
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      onUpdateDecisionLine(lineId, {
+        option1Position: { x: clampedX, y: clampedY }
+      });
+      return;
+    }
+    
+    // Check if dragging a decision line option2 point
+    if (draggedPlayer && draggedPlayer.startsWith('decisionline-option2-')) {
+      const lineId = draggedPlayer.replace('decisionline-option2-', '');
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      onUpdateDecisionLine(lineId, {
+        option2Position: { x: clampedX, y: clampedY }
+      });
+      return;
+    }
+    
+    // Check if dragging a free line end point
+    if (draggedPlayer && draggedPlayer.startsWith('freeline-end-')) {
+      const lineId = draggedPlayer.replace('freeline-end-', '');
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      // Check for nearby player to highlight
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+      const nearbyPlayer = players.find(player => {
+        if (!player.position || player.onBoard === false) return false;
+        const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+        const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+        const distance = Math.sqrt(Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2));
+        return distance < 80;
+      });
+      setSnapTargetPlayerId(nearbyPlayer?.id || null);
+
+      
+      onUpdateFreeLine(lineId, {
+        endPosition: { x: clampedX, y: clampedY }
+      });
+      return;
+    }
+    
+    // Check if dragging a simple connection line
+    if (draggedPlayer && draggedPlayer.startsWith('connection-')) {
+      const connectionCardId = draggedPlayer.replace('connection-', '');
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      const x = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+      const y = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+      
+      const clampedX = Math.max(8, Math.min(92, x));
+      const clampedY = Math.max(8, Math.min(92, y));
+      
+      // Find the card and update position directly (like decision boxes)
+      const card = cards.find(c => c.id === connectionCardId);
+      
+      if (card && onUpdateCard) {
+        // Save the absolute position
+        onUpdateCard(card.id, {
+          openEndPosition: { x: clampedX, y: clampedY }
+        });
+      }
+      return;
+    }
     
     // Check if dragging a decision box
     if (draggedPlayer && draggedPlayer.startsWith('decision-')) {
@@ -1072,6 +1640,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     // Wenn der Spieler bereits auf dem Board ist (hat eine Position oder onBoard === true), aktualisiere die Position
     if (player.onBoard === true || (player.onBoard !== false && player.position)) {
       if (onUpdatePlayerPosition && draggedPlayer) {
+        console.log('🔵🔵🔵 PLAYER MOVE:', player.name, 'to', { x: clampedX, y: clampedY });
         onUpdatePlayerPosition(draggedPlayer, { x: clampedX, y: clampedY });
       }
     }
@@ -1082,211 +1651,420 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
-    console.log('🖱️ handleMouseUp called', { draggedPlayer, draggedProcessStep });
+    console.log('🖱️ handleMouseUp called - draggedConnection:', !!draggedConnection, 'refDraggedConnection:', !!draggedConnectionRef.current);
+    
+    // Connection dragging is now handled by global window mouseUp handler
+    // Don't interfere with it here - check BOTH state and ref!
+    if (draggedConnection || draggedConnectionRef.current) {
+      console.log('⏭️ Skipping - connection drag handled by global mouseUp');
+      return;
+    }
+    
+    console.log('⚠️ NOT skipping - continuing with handleMouseUp cleanup');
+    
+    // Wenn ein Kommunikationsobjekt gezogen wurde
+    if (draggedCommObject !== null) {
+      console.log('✅ Kommunikationsobjekt erfolgreich positioniert');
+      setDraggedCommObject(null);
+      return;
+    }
+    
+    // Wenn eine freie Linie gezogen wurde
+    if (draggedPlayer && (draggedPlayer.startsWith('freeline-start-') || draggedPlayer.startsWith('freeline-end-') || draggedPlayer.startsWith('freeline-middle-'))) {
+      console.log('✅ Freie Linie erfolgreich positioniert');
+      
+      const lineId = draggedPlayer.replace('freeline-start-', '').replace('freeline-end-', '').replace('freeline-middle-', '');
+      const line = freeLines.find(l => l.id === lineId);
+      
+      // Prüfe ob über einem Spieler losgelassen
+      if (gameBoardRef.current) {
+        const boardRect = gameBoardRef.current.getBoundingClientRect();
+        
+        // Für Middle-Drag: Prüfe beide Endpunkte
+        if (draggedPlayer.startsWith('freeline-middle-')) {
+          if (line) {
+            // Prüfe Startpunkt
+            const startPixelX = (line.startPosition.x / 100) * boardRect.width + boardRect.left;
+            const startPixelY = (line.startPosition.y / 100) * boardRect.height + boardRect.top;
+            
+            const nearbyPlayerStart = players.find(player => {
+              if (!player.position || player.onBoard === false) return false;
+              const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+              const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+              const distance = Math.sqrt(Math.pow(startPixelX - playerX, 2) + Math.pow(startPixelY - playerY, 2));
+              return distance < 80;
+            });
+            
+            if (nearbyPlayerStart && nearbyPlayerStart.position) {
+              console.log(`🔗 Linie Start an Spieler ${nearbyPlayerStart.name} angedockt (Middle-Drag)`);
+              onUpdateFreeLine(lineId, {
+                startPlayerId: nearbyPlayerStart.id,
+                startPosition: { x: nearbyPlayerStart.position.x, y: nearbyPlayerStart.position.y }
+              });
+            }
+            
+            // Prüfe Endpunkt
+            const endPixelX = (line.endPosition.x / 100) * boardRect.width + boardRect.left;
+            const endPixelY = (line.endPosition.y / 100) * boardRect.height + boardRect.top;
+            
+            const nearbyPlayerEnd = players.find(player => {
+              if (!player.position || player.onBoard === false) return false;
+              const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+              const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+              const distance = Math.sqrt(Math.pow(endPixelX - playerX, 2) + Math.pow(endPixelY - playerY, 2));
+              return distance < 80;
+            });
+            
+            if (nearbyPlayerEnd && nearbyPlayerEnd.position) {
+              console.log(`🔗 Linie Ende an Spieler ${nearbyPlayerEnd.name} angedockt (Middle-Drag)`);
+              onUpdateFreeLine(lineId, {
+                endPlayerId: nearbyPlayerEnd.id,
+                endPosition: { x: nearbyPlayerEnd.position.x, y: nearbyPlayerEnd.position.y }
+              });
+            }
+          }
+        } 
+        // Für Start/End-Drag: Prüfe nur das gezogene Ende
+        else {
+          const isStart = draggedPlayer.startsWith('freeline-start-');
+          
+          // Verwende den bereits während des Drags identifizierten Snap-Target
+          if (snapTargetPlayerId) {
+            const targetPlayer = players.find(p => p.id === snapTargetPlayerId);
+            if (targetPlayer && targetPlayer.position) {
+              console.log(`🔗 Linie ${isStart ? 'Start' : 'Ende'} an Spieler ${targetPlayer.name} angedockt (via snapTarget)`);
+              if (isStart) {
+                onUpdateFreeLine(lineId, {
+                  startPlayerId: targetPlayer.id,
+                  startPosition: { x: targetPlayer.position.x, y: targetPlayer.position.y }
+                });
+              } else {
+                onUpdateFreeLine(lineId, {
+                  endPlayerId: targetPlayer.id,
+                  endPosition: { x: targetPlayer.position.x, y: targetPlayer.position.y }
+                });
+              }
+            }
+          } else {
+            // Fallback: Suche manuell nach Spieler in der Nähe
+            const mouseX = e.clientX;
+            const mouseY = e.clientY;
+            
+            console.log(`🔍 Suche Spieler in der Nähe von (${mouseX}, ${mouseY})`);
+            
+            const nearbyPlayer = players.find(player => {
+              if (!player.position) return false;
+              if (player.onBoard === false) return false;
+              
+              const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+              const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+              
+              const distance = Math.sqrt(
+                Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
+              );
+              
+              console.log(`  - ${player.name}: position (${playerX}, ${playerY}), distance ${distance.toFixed(1)}px`);
+              
+              return distance < 80;
+            });
+            
+            if (nearbyPlayer && nearbyPlayer.position) {
+              console.log(`🔗 Linie ${isStart ? 'Start' : 'Ende'} an Spieler ${nearbyPlayer.name} angedockt`);
+              if (isStart) {
+                onUpdateFreeLine(lineId, {
+                  startPlayerId: nearbyPlayer.id,
+                  startPosition: { x: nearbyPlayer.position.x, y: nearbyPlayer.position.y }
+                });
+              } else {
+                onUpdateFreeLine(lineId, {
+                  endPlayerId: nearbyPlayer.id,
+                  endPosition: { x: nearbyPlayer.position.x, y: nearbyPlayer.position.y }
+                });
+              }
+            } else {
+              console.log('❌ Kein Spieler in der Nähe gefunden');
+              // Lösche die Verbindung zum Spieler, falls die Linie wegbewegt wird
+              if (line && isStart && line.startPlayerId) {
+                onUpdateFreeLine(lineId, {
+                  startPlayerId: undefined
+                });
+              } else if (line && !isStart && line.endPlayerId) {
+                onUpdateFreeLine(lineId, {
+                  endPlayerId: undefined
+                });
+              }
+            }
+          }
+        }
+      }
+      
+      setDraggedPlayer(null);
+      setFreeLineMiddleDragOffset(null);
+      setSnapTargetPlayerId(null);
+      return;
+    }
+    
+    // Wenn eine einfache Verbindungslinie gezogen wurde
+    if (draggedPlayer && draggedPlayer.startsWith('connection-')) {
+      console.log('✅ Simple connection line erfolgreich positioniert');
+      setDraggedPlayer(null);
+      return;
+    }
+    
+    // Wenn eine Decision Box gezogen wurde
+    if (draggedPlayer && draggedPlayer.startsWith('decision-')) {
+      const decisionId = draggedPlayer.replace('decision-', '');
+      
+      if (gameBoardRef.current) {
+        const mouseX = e.clientX;
+        const mouseY = e.clientY;
+        const boardRect = gameBoardRef.current.getBoundingClientRect();
+        
+        // Prüfe ob über einem Spieler gedroppt
+        const nearbyPlayer = players.find(player => {
+          if (!player.position || player.onBoard === false) return false;
+          
+          const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+          const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+          
+          const distance = Math.sqrt(
+            Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
+          );
+          
+          return distance < 80;
+        });
+        
+        if (nearbyPlayer && nearbyPlayer.position) {
+          // Andocken an Spieler
+          console.log(`🔗 Decision Box an Spieler ${nearbyPlayer.name} angedockt`);
+          setDecisionBoxes(prev => prev.map(box => 
+            box.id === decisionId 
+              ? { 
+                  ...box, 
+                  dockedToPlayerId: nearbyPlayer.id,
+                  position: { x: nearbyPlayer.position!.x, y: nearbyPlayer.position!.y }
+                }
+              : box
+          ));
+        }
+      }
+      
+      console.log('✅ Decision Box erfolgreich positioniert');
+      setDraggedPlayer(null);
+      return;
+    }
+    
+    // Wenn eine Decision Line Endpoint gezogen wurde - Andocken an Spieler
+    if (draggedPlayer && (draggedPlayer.startsWith('decisionline-start-') || 
+                          draggedPlayer.startsWith('decisionline-option1-') || 
+                          draggedPlayer.startsWith('decisionline-option2-'))) {
+      if (gameBoardRef.current) {
+        const mouseX = e.clientX;
+        const mouseY = e.clientY;
+        const boardRect = gameBoardRef.current.getBoundingClientRect();
+        
+        // Bestimme welcher Endpoint
+        let lineId: string;
+        let endpointType: 'start' | 'option1' | 'option2';
+        if (draggedPlayer.startsWith('decisionline-start-')) {
+          lineId = draggedPlayer.replace('decisionline-start-', '');
+          endpointType = 'start';
+        } else if (draggedPlayer.startsWith('decisionline-option1-')) {
+          lineId = draggedPlayer.replace('decisionline-option1-', '');
+          endpointType = 'option1';
+        } else {
+          lineId = draggedPlayer.replace('decisionline-option2-', '');
+          endpointType = 'option2';
+        }
+        
+        // Prüfe ob über einem Spieler gedroppt
+        const nearbyPlayer = players.find(player => {
+          if (!player.position || player.onBoard === false) return false;
+          
+          const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+          const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+          
+          const distance = Math.sqrt(
+            Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
+          );
+          
+          return distance < 80;
+        });
+        
+        if (nearbyPlayer && nearbyPlayer.position) {
+          console.log(`🔗 Decision Line ${endpointType} an Spieler ${nearbyPlayer.name} angedockt`);
+          
+          // Andocken je nach Endpoint-Typ
+          if (endpointType === 'start') {
+            onUpdateDecisionLine(lineId, {
+              startPlayerId: nearbyPlayer.id,
+              startPosition: { x: nearbyPlayer.position.x, y: nearbyPlayer.position.y }
+            });
+          } else if (endpointType === 'option1') {
+            onUpdateDecisionLine(lineId, {
+              option1PlayerId: nearbyPlayer.id,
+              option1Position: { x: nearbyPlayer.position.x, y: nearbyPlayer.position.y }
+            });
+          } else {
+            onUpdateDecisionLine(lineId, {
+              option2PlayerId: nearbyPlayer.id,
+              option2Position: { x: nearbyPlayer.position.x, y: nearbyPlayer.position.y }
+            });
+          }
+        } else {
+          // Kein Spieler in der Nähe - löse Verbindung falls vorhanden
+          const line = decisionLines.find(l => l.id === lineId);
+          if (line) {
+            if (endpointType === 'start' && line.startPlayerId) {
+              onUpdateDecisionLine(lineId, { startPlayerId: undefined });
+            } else if (endpointType === 'option1' && line.option1PlayerId) {
+              onUpdateDecisionLine(lineId, { option1PlayerId: undefined });
+            } else if (endpointType === 'option2' && line.option2PlayerId) {
+              onUpdateDecisionLine(lineId, { option2PlayerId: undefined });
+            }
+          }
+        }
+      }
+      
+      setDraggedPlayer(null);
+      return;
+    }
+    
+    // Wenn ein offenes Verbindungsende gezogen wurde
+    if (draggedConnectionEnd && gameBoardRef.current) {
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+      const boardRect = gameBoardRef.current.getBoundingClientRect();
+      
+      // Prüfe ob über einem Spieler gedroppt
+      const targetPlayer = players.find(player => {
+        if (!player.position || player.onBoard === false) return false;
+        
+        const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
+        const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
+        
+        const distance = Math.sqrt(
+          Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
+        );
+        
+        return distance < 60;
+      });
+      
+      if (targetPlayer && onUpdateCard) {
+        // Verbinde mit Spieler
+        const card = cards.find(c => c.id === draggedConnectionEnd.cardId);
+        if (card) {
+          if (draggedConnectionEnd.isStart) {
+            // Verbinde Start mit Spieler
+            onUpdateCard(card.id, {
+              fromPlayerId: targetPlayer.id,
+              playerId: targetPlayer.id,
+              playerName: targetPlayer.name,
+              text: card.toPlayerId 
+                ? `Prozess: ${targetPlayer.name} → ${players.find(p => p.id === card.toPlayerId)?.name}`
+                : `Prozess von ${targetPlayer.name}`,
+              openEndPosition: undefined
+            });
+          } else {
+            // Verbinde Ende mit Spieler
+            const fromPlayer = players.find(p => p.id === card.fromPlayerId);
+            onUpdateCard(card.id, {
+              toPlayerId: targetPlayer.id,
+              text: fromPlayer
+                ? `Prozess: ${fromPlayer.name} → ${targetPlayer.name}`
+                : `Prozess → ${targetPlayer.name}`,
+              openEndPosition: undefined
+            });
+          }
+        }
+      }
+      
+      setDraggedConnectionEnd(null);
+      return;
+    }
     
     // Speichere die Werte BEVOR sie zurückgesetzt werden
     const currentDraggedPlayer = draggedPlayer;
     const currentDraggedProcessStep = draggedProcessStep;
-    
+
     // Wenn ein Spieler gezogen wurde (aus Wartebereich ODER bereits auf dem Board)
     if (currentDraggedPlayer && gameBoardRef.current) {
       const player = players.find(p => p.id === currentDraggedPlayer);
-      
+
       if (player) {
         const boardRect = gameBoardRef.current.getBoundingClientRect();
         const mouseX = e.clientX;
         const mouseY = e.clientY;
-        
+
         // Prüfe ob die Maus über dem Spielfeld ist
         const isOverBoard = mouseX >= boardRect.left && 
                            mouseX <= boardRect.right && 
                            mouseY >= boardRect.top && 
                            mouseY <= boardRect.bottom;
-        
+
         if (isOverBoard) {
           // Berechne Position auf dem Spielfeld
           const dropX = ((mouseX - boardRect.left) / boardRect.width) * 100;
           const dropY = ((mouseY - boardRect.top) / boardRect.height) * 100;
-          
-          // Prüfe ob Spieler auf eine offene Verbindung gezogen wird
-          const openConnections = cards.filter(card => !card.toPlayerId); // Alle ohne Empfänger
-          console.log('🔍 Offene Verbindungen gefunden:', openConnections.length, openConnections);
-          let connectedToOpenEnd = false;
-          
-          for (const card of openConnections) {
-            let openEndX, openEndY;
-            let fromPlayer = null;
-            
-            if (card.fromPlayerId) {
-              // Verbindung mit Sender
-              fromPlayer = players.find(p => p.id === card.fromPlayerId);
-              if (!fromPlayer) continue;
-              
-              const fromPlayerIndex = players.indexOf(fromPlayer);
-              const fromPos = getPlayerPosition(fromPlayer, fromPlayerIndex, players.length);
-              
-              // Berechne wo das offene Ende der Linie ist
-              openEndX = card.openEndPosition?.x ?? (fromPos.x + 20);
-              openEndY = card.openEndPosition?.y ?? fromPos.y;
-            } else {
-              // Freie Verbindung ohne Sender - verwende gespeicherte Position oder Default
-              openEndX = card.openEndPosition?.x ?? 30;
-              openEndY = card.openEndPosition?.y ?? 30;
-            }
-            
-            // Prüfe Abstand zum offenen Ende
-            const dx = dropX - openEndX;
-            const dy = dropY - openEndY;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            console.log('📏 Abstand zum offenen Ende:', distance, 'Position:', { dropX, dropY, openEndX, openEndY });
-            
-            if (distance < 8) { // 8% Radius für Snap
-              console.log('🔗 Spieler wird an offenes Ende angedockt', card.fromPlayerId || '(frei)', '→', player.name);
-              
-                // Aktualisiere die Karte mit dem neuen Empfänger
-                if (onUpdateCard) {
-                  const newText = card.fromPlayerId && fromPlayer
-                    ? `Prozess: ${fromPlayer.name} → ${player.name}`
-                    : `Prozess → ${player.name}`;
-                  onUpdateCard(card.id, {
-                    toPlayerId: player.id,
-                    text: newText
-                  });
-                }              // Platziere Spieler in der Nähe des offenen Endes
-              if (onUpdatePlayerPosition) {
-                onUpdatePlayerPosition(currentDraggedPlayer, { x: openEndX, y: openEndY });
-              }
-              
-              connectedToOpenEnd = true;
-              break;
-            }
-          }
-          
-          // Prüfe auch ob Spieler auf den ANFANG einer Verbindung ohne Sender gezogen wird
-          if (!connectedToOpenEnd) {
-            const startlessConnections = cards.filter(card => !card.fromPlayerId && card.toPlayerId);
-            console.log('🔍 Verbindungen ohne Sender gefunden:', startlessConnections.length);
-            
-            for (const card of startlessConnections) {
-              // Position des Anfangs (wo normalerweise der Sender wäre)
-              const startX = card.openEndPosition?.x ?? 30;
-              const startY = card.openEndPosition?.y ?? 30;
-              
-              // Prüfe Abstand zum Anfang
+
+          // 1. Prüfe ob Spieler auf ein offenes Ende einer freien Linie gezogen wird
+          let connectedToFreeLine = false;
+          for (const line of freeLines) {
+            // Startpunkt prüfen
+            if (!line.startPlayerId) {
+              const startX = line.startPosition.x;
+              const startY = line.startPosition.y;
               const dx = dropX - startX;
               const dy = dropY - startY;
               const distance = Math.sqrt(dx * dx + dy * dy);
-              
-              console.log('📏 Abstand zum Start:', distance, 'Position:', { dropX, dropY, startX, startY });
-              
-              if (distance < 8) { // 8% Radius für Snap
-                const toPlayer = players.find(p => p.id === card.toPlayerId);
-                console.log('🔗 Spieler wird an Anfang angedockt', player.name, '→', toPlayer?.name);
-                
-                // Aktualisiere die Karte mit dem neuen Sender
-                if (onUpdateCard) {
-                  const newText = toPlayer
-                    ? `Prozess: ${player.name} → ${toPlayer.name}`
-                    : `Prozess von ${player.name}`;
-                  onUpdateCard(card.id, {
-                    fromPlayerId: player.id,
-                    playerId: player.id,
-                    playerName: player.name,
-                    text: newText
+              if (distance < 8) {
+                // Andocken am Startpunkt
+                if (onUpdateFreeLine) {
+                  onUpdateFreeLine(line.id, {
+                    startPlayerId: player.id,
+                    startPosition: { x: player.position?.x ?? dropX, y: player.position?.y ?? dropY }
                   });
                 }
-                
-                // Platziere Spieler in der Nähe des Anfangs
                 if (onUpdatePlayerPosition) {
                   onUpdatePlayerPosition(currentDraggedPlayer, { x: startX, y: startY });
                 }
-                
-                connectedToOpenEnd = true;
+                connectedToFreeLine = true;
+                break;
+              }
+            }
+            // Endpunkt prüfen
+            if (!line.endPlayerId) {
+              const endX = line.endPosition.x;
+              const endY = line.endPosition.y;
+              const dx = dropX - endX;
+              const dy = dropY - endY;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < 8) {
+                // Andocken am Endpunkt
+                if (onUpdateFreeLine) {
+                  onUpdateFreeLine(line.id, {
+                    endPlayerId: player.id,
+                    endPosition: { x: player.position?.x ?? dropX, y: player.position?.y ?? dropY }
+                  });
+                }
+                if (onUpdatePlayerPosition) {
+                  onUpdatePlayerPosition(currentDraggedPlayer, { x: endX, y: endY });
+                }
+                connectedToFreeLine = true;
                 break;
               }
             }
           }
-          
-          // Prüfe auch ob Spieler auf Decision Box Ein-/Ausgänge gezogen wird
-          if (!connectedToOpenEnd) {
-            for (const decisionBox of decisionBoxes) {
-              // Prüfe Eingang (wenn kein fromPlayer)
-              if (!decisionBox.fromPlayerId) {
-                const inputX = decisionBox.position.x - 15;
-                const inputY = decisionBox.position.y;
-                
-                const dx = dropX - inputX;
-                const dy = dropY - inputY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                
-                if (distance < 8) {
-                  console.log('🔗 Spieler wird an Decision Box Eingang angedockt');
-                  
-                  // Aktualisiere Decision Box mit neuem Sender
-                  setDecisionBoxes(prev => prev.map(box => 
-                    box.id === decisionBox.id 
-                      ? { ...box, fromPlayerId: player.id }
-                      : box
-                  ));
-                  
-                  if (onUpdatePlayerPosition) {
-                    onUpdatePlayerPosition(currentDraggedPlayer, { x: inputX, y: inputY });
-                  }
-                  
-                  connectedToOpenEnd = true;
-                  break;
-                }
-              }
-              
-              // Prüfe Ausgänge (wenn kein toPlayer)
-              decisionBox.options.forEach((option, optionIndex) => {
-                if (!option.toPlayerId && !connectedToOpenEnd) {
-                  const angle = optionIndex * 60 - 30;
-                  const outputX = decisionBox.position.x + 15 * Math.cos(angle * Math.PI / 180);
-                  const outputY = decisionBox.position.y + 15 * Math.sin(angle * Math.PI / 180);
-                  
-                  const dx = dropX - outputX;
-                  const dy = dropY - outputY;
-                  const distance = Math.sqrt(dx * dx + dy * dy);
-                  
-                  if (distance < 8) {
-                    console.log('🔗 Spieler wird an Decision Box Ausgang angedockt');
-                    
-                    // Aktualisiere Decision Box Option mit neuem Empfänger
-                    setDecisionBoxes(prev => prev.map(box => 
-                      box.id === decisionBox.id 
-                        ? {
-                            ...box,
-                            options: box.options.map((opt, idx) =>
-                              idx === optionIndex
-                                ? { ...opt, toPlayerId: player.id }
-                                : opt
-                            )
-                          }
-                        : box
-                    ));
-                    
-                    if (onUpdatePlayerPosition) {
-                      onUpdatePlayerPosition(currentDraggedPlayer, { x: outputX, y: outputY });
-                    }
-                    
-                    connectedToOpenEnd = true;
-                  }
-                }
-              });
-              
-              if (connectedToOpenEnd) break;
+
+          // 2. Prüfe ob Spieler auf eine offene Verbindung gezogen wird (wie bisher)
+          if (!connectedToFreeLine) {
+            // Placeholder für zukünftige Connection-Logik
+            // Wenn nicht an offenes Ende gedockt: normal platzieren
+            if (player.onBoard === false && onUpdatePlayerPosition) {
+              const clampedX = Math.max(8, Math.min(92, dropX));
+              const clampedY = Math.max(8, Math.min(92, dropY));
+              onUpdatePlayerPosition(currentDraggedPlayer, { x: clampedX, y: clampedY });
             }
-          }
-          
-          // Wenn nicht an offenes Ende gedockt:
-          // - Spieler aus Wartebereich: normal platzieren
-          // - Spieler schon auf Board: Position wird durch handleMouseMove bereits aktualisiert
-          if (!connectedToOpenEnd && player.onBoard === false && onUpdatePlayerPosition) {
-            const clampedX = Math.max(8, Math.min(92, dropX));
-            const clampedY = Math.max(8, Math.min(92, dropY));
-            onUpdatePlayerPosition(currentDraggedPlayer, { x: clampedX, y: clampedY });
           }
         }
       }
@@ -1301,74 +2079,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
       const mouseY = e.clientY;
       const boardRect = gameBoardRef.current.getBoundingClientRect();
       
-      // Prüfe ob über dem Spielfeld
-      const isOverBoard = mouseX >= boardRect.left && 
-                         mouseX <= boardRect.right && 
-                         mouseY >= boardRect.top && 
-                         mouseY <= boardRect.bottom;
-      
-      console.log('🎯 Über dem Board:', isOverBoard, { mouseX, mouseY, boardRect });
-      
-      let wasPlaced = false;
-      
-      if (isOverBoard) {
-        // Prüfe ob über einem Spieler gedroppt
-        const targetPlayer = players.find(player => {
-          if (!player.position || player.onBoard === false) return false;
-          
-          const playerX = (player.position.x / 100) * boardRect.width + boardRect.left;
-          const playerY = (player.position.y / 100) * boardRect.height + boardRect.top;
-          
-          const distance = Math.sqrt(
-            Math.pow(mouseX - playerX, 2) + Math.pow(mouseY - playerY, 2)
-          );
-          
-          return distance < 60;
-        });
-        
-        if (targetPlayer) {
-          // Prozessschritt dem Spieler zuordnen
-          console.log('✅ Verknüpfe Prozessschritt mit Spieler:', targetPlayer.name);
-          onUpdateProcessObject(currentDraggedProcessStep, {
-            inWaitingArea: false,
-            assignedToPlayerId: targetPlayer.id,
-            position: null as any
-          } as Partial<ProcessObject>);
-          wasPlaced = true;
-        } else {
-          // Frei auf dem Spielfeld platzieren
-          const x = ((mouseX - boardRect.left) / boardRect.width) * 100;
-          const y = ((mouseY - boardRect.top) / boardRect.height) * 100;
-          const clampedX = Math.max(8, Math.min(92, x));
-          const clampedY = Math.max(8, Math.min(92, y));
-          
-          console.log('✅ Platziere Prozessschritt frei auf Spielfeld:', clampedX, clampedY);
-          onUpdateProcessObject(currentDraggedProcessStep, {
-            inWaitingArea: false,
-            position: { x: clampedX, y: clampedY },
-            assignedToPlayerId: null as any
-          } as Partial<ProcessObject>);
-          wasPlaced = true;
-        }
-      }
-      
-      // Wenn nicht platziert wurde, stelle ursprünglichen Zustand wieder her
-      if (!wasPlaced && draggedProcessStepOriginalState) {
-        console.log('↩️ Prozessschritt nicht platziert - stelle ursprünglichen Zustand wieder her:', draggedProcessStepOriginalState);
-        onUpdateProcessObject(currentDraggedProcessStep, {
-          inWaitingArea: draggedProcessStepOriginalState.inWaitingArea,
-          position: draggedProcessStepOriginalState.position,
-          assignedToPlayerId: draggedProcessStepOriginalState.assignedToPlayerId
-        } as Partial<ProcessObject>);
-      } else if (!wasPlaced) {
-        console.warn('⚠️ Prozessschritt nicht platziert UND kein ursprünglicher Zustand gespeichert!');
-      } else {
-        console.log('✅ Prozessschritt wurde platziert');
-      }
-    }
-
-    // Wenn ein Spieler gezogen wird, prüfe ob er auf einen freien Prozessschritt fällt
-    if (currentDraggedPlayer && e.button === 0) {
       const player = players.find(p => p.id === currentDraggedPlayer);
       if (!player) return;
 
@@ -1424,6 +2134,11 @@ const GameBoard: React.FC<GameBoardProps> = ({
     setDraggedProcessStep(null);
     setDraggedProcessStepOriginalState(null);
     setDragPreviewPosition(null);
+    setDraggedConnectionEnd(null);
+    setDraggedCommObject(null);
+    setDraggedConnection(null);
+    setConnectionDragStart(null);
+    setConnectionDragOffset({ x: 0, y: 0 });
   };
 
   const getPlayerPosition = (player: Player, index: number, total: number) => {
@@ -1476,7 +2191,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   // Helper function to calculate curve control point (avoid duplication)
-  const calculateCurveControlPoint = (fromPos: {x: number, y: number}, toPos: {x: number, y: number}, fromId: string, toId: string) => {
+  const calculateCurveControlPoint = (fromPos: {x: number, y: number}, toPos: {x: number, y: number}, fromId: string, toId: string, curveOffset?: {x: number, y: number}) => {
     const dx = toPos.x - fromPos.x;
     const dy = toPos.y - fromPos.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -1509,8 +2224,15 @@ const GameBoard: React.FC<GameBoardProps> = ({
     // For reverse connections: use alternating direction
     if (hasReverseConnection) {
       const curveDirection = isReverseConnection ? -1 : 1;
-      const controlX = midX + perpX * controlPointDistance * curveDirection;
-      const controlY = midY + perpY * controlPointDistance * curveDirection;
+      let controlX = midX + perpX * controlPointDistance * curveDirection;
+      let controlY = midY + perpY * controlPointDistance * curveDirection;
+      
+      // Apply curve offset if provided
+      if (curveOffset) {
+        controlX += curveOffset.x;
+        controlY += curveOffset.y;
+      }
+      
       return { controlX, controlY, controlPointDistance, finalDirection: curveDirection };
     }
     
@@ -1522,8 +2244,14 @@ const GameBoard: React.FC<GameBoardProps> = ({
     // Choose direction that points away from center (positive dot product = same direction)
     const curveDirection = dot1 > dot2 ? 1 : -1;
     
-    const controlX = midX + perpX * controlPointDistance * curveDirection;
-    const controlY = midY + perpY * controlPointDistance * curveDirection;
+    let controlX = midX + perpX * controlPointDistance * curveDirection;
+    let controlY = midY + perpY * controlPointDistance * curveDirection;
+    
+    // Apply curve offset if provided
+    if (curveOffset) {
+      controlX += curveOffset.x;
+      controlY += curveOffset.y;
+    }
     
     return { controlX, controlY, controlPointDistance, finalDirection: curveDirection };
   };
@@ -2185,35 +2913,35 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     className="fixed inset-0 z-40" 
                     onClick={() => setShowManagementMenu(false)}
                   />
-                  <div className="absolute top-full right-0 mt-2 w-[500px] bg-slate-800 rounded-2xl shadow-2xl border border-white/20 z-50 max-h-[600px] overflow-y-auto">
+                  <div className="absolute top-full right-0 mt-2 w-[500px] bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 rounded-2xl shadow-2xl border-2 border-purple-400/30 z-50 overflow-hidden">
                     {!showVersions ? (
-                      <div className="p-6">
-                        <div className="flex items-center gap-3 mb-6">
-                          <div className="p-3 bg-blue-500/20 rounded-xl">
-                            <svg className="w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <div className="p-8">
+                        <div className="flex items-center gap-3 mb-8">
+                          <div className="p-3 bg-purple-500/20 rounded-xl border border-purple-400/30">
+                            <svg className="w-7 h-7 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
                               <polyline points="17 21 17 13 7 13 7 21" />
                               <polyline points="7 3 7 8 15 8" />
                             </svg>
                           </div>
                           <div>
-                            <h3 className="text-white font-bold text-xl">Spiel speichern</h3>
+                            <h3 className="text-white font-bold text-2xl">Spiel speichern</h3>
                             <p className="text-gray-400 text-sm">Erstelle eine neue Version</p>
                           </div>
                         </div>
                         
-                        <div className="mb-4">
-                          <label className="block text-sm font-medium text-gray-300 mb-2">Versionsname</label>
+                        <div className="mb-6">
+                          <label className="block text-sm font-semibold text-gray-300 mb-3">Versionsname</label>
                           <input
                             type="text"
-                            value={saveName}
-                            onChange={(e) => setSaveName(e.target.value)}
+                            value={companyName}
+                            onChange={(e) => setCompanyName(e.target.value)}
                             placeholder="z.B. Version 1.0, Zwischenstand, Finale Version..."
-                            className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-blue-400 focus:outline-none text-base"
+                            className="w-full px-5 py-4 bg-slate-700/50 text-white rounded-xl border-2 border-purple-400/30 focus:border-purple-400 focus:outline-none text-base placeholder-gray-500 transition-all shadow-lg"
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter' && saveName.trim() && gameId) {
+                              if (e.key === 'Enter' && companyName.trim() && gameId) {
                                 e.preventDefault();
-                                const saveBtn = document.getElementById('save-version-btn');
+                                const saveBtn = document.getElementById('save-process-btn');
                                 saveBtn?.click();
                               }
                             }}
@@ -2221,61 +2949,79 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         </div>
                         
                         {saveMessage && (
-                          <div className="mb-4 px-4 py-3 bg-green-500/20 text-green-300 rounded-xl text-sm font-medium flex items-center gap-2">
-                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <div className="mb-6 px-5 py-4 bg-green-500/20 text-green-300 rounded-xl text-sm font-semibold flex items-center gap-3 border border-green-400/30 shadow-lg">
+                            <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                               <polyline points="20 6 9 17 4 12" />
                             </svg>
                             {saveMessage}
                           </div>
                         )}
                         
-                        <div className="space-y-3">
+                        <div className="space-y-3 mb-6">
                           <button
-                            id="save-version-btn"
+                            id="save-process-btn"
                             onClick={async () => {
-                              if (saveName.trim() && gameId) {
+                              if (companyName.trim() && gameId) {
                                 try {
-                                  await gameService.saveGameVersion(gameId, saveName.trim(), {
+                                  await gameService.saveGameVersion(gameId, companyName.trim(), {
                                     players,
                                     cards,
                                     processObjects
                                   });
-                                  setSaveMessage('Version gespeichert!');
+                                  setSaveMessage('Prozess erfolgreich gespeichert!');
                                   setTimeout(() => {
                                     setSaveMessage('');
-                                    setSaveName('');
-                                  }, 2000);
+                                    setCompanyName('');
+                                  }, 3000);
                                 } catch (error) {
                                   console.error('Fehler beim Speichern:', error);
                                   setSaveMessage('Fehler beim Speichern');
                                 }
                               }
                             }}
-                            disabled={!saveName.trim()}
-                            className="w-full flex items-center justify-center gap-3 px-5 py-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold text-base shadow-lg hover:shadow-xl disabled:shadow-none"
+                            disabled={!companyName.trim()}
+                            className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-all font-bold text-base shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98] disabled:shadow-none disabled:scale-100"
                           >
-                            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                               <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
                               <polyline points="17 21 17 13 7 13 7 21" />
                               <polyline points="7 3 7 8 15 8" />
                             </svg>
-                            Version speichern
+                            Prozess speichern
                           </button>
                           
                           <button
                             onClick={() => setShowVersions(true)}
-                            className="w-full flex items-center justify-center gap-3 px-5 py-4 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-all font-semibold text-base border border-white/10"
+                            className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-slate-700/50 hover:bg-slate-600/50 text-white rounded-xl transition-all font-bold text-base border-2 border-purple-400/30 hover:border-purple-400/50 shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
                           >
-                            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                             </svg>
-                            Gespeicherte Versionen anzeigen
+                            Prozess öffnen
                             {gameVersions.length > 0 && (
-                              <span className="ml-auto px-2.5 py-1 bg-blue-500/20 text-blue-300 rounded-lg text-sm font-bold">
+                              <span className="ml-auto px-3 py-1.5 bg-purple-500/30 text-purple-300 rounded-lg text-sm font-bold border border-purple-400/30">
                                 {gameVersions.length}
                               </span>
                             )}
+                          </button>
+                        </div>
+                        
+                        <div className="pt-4 border-t-2 border-slate-700/50">
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Möchtest du dich wirklich abmelden?')) {
+                                // Logout-Logik hier
+                                setShowManagementMenu(false);
+                              }
+                            }}
+                            className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-slate-700/30 hover:bg-red-500/20 text-gray-300 hover:text-red-300 rounded-xl transition-all font-semibold text-base border-2 border-slate-600/30 hover:border-red-400/30"
+                          >
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                              <polyline points="16 17 21 12 16 7" />
+                              <line x1="21" y1="12" x2="9" y2="12" />
+                            </svg>
+                            Abmelden
                           </button>
                         </div>
                       </div>
@@ -2477,6 +3223,55 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 </button>
                 
                 <button
+                  onClick={() => {
+                    // Füge eine neue freie Linie hinzu
+                    onAddFreeLine({
+                      startPosition: { x: 30, y: 30 },
+                      endPosition: { x: 70, y: 30 },
+                      color: '#3B82F6',
+                      thickness: 2,
+                      style: 'solid'
+                    });
+                    setShowDropdown(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left group"
+                >
+                  <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center group-hover:bg-blue-500/30 transition-colors">
+                    <span className="text-lg">📏</span>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white">Freie Linie</div>
+                    <div className="text-xs text-gray-400">Verschiebbare Linie hinzufügen</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    // Füge eine neue Entscheidungslinie hinzu
+                    onAddDecisionLine({
+                      startPosition: { x: 30, y: 50 },
+                      option1Position: { x: 60, y: 35 },
+                      option2Position: { x: 60, y: 65 },
+                      decisionBoxPosition: { x: 45, y: 50 },
+                      question: 'Entscheidung?',
+                      option1Label: 'Ja',
+                      option2Label: 'Nein',
+                      color: '#F59E0B'
+                    });
+                    setShowDropdown(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left group"
+                >
+                  <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center group-hover:bg-amber-500/30 transition-colors">
+                    <span className="text-lg">⚡</span>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white">Entscheidung</div>
+                    <div className="text-xs text-gray-400">Zwei Optionen mit Decision Box</div>
+                  </div>
+                </button>
+
+                <button
                   onClick={handleAddTestProcesses}
                   disabled={players.filter(p => p.onBoard !== false).length < 4}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed group"
@@ -2657,20 +3452,38 @@ const GameBoard: React.FC<GameBoardProps> = ({
           <div 
             ref={gameBoardRef}
             className={`${inspectedPlayer || inspectedProcessStep || inspectedDecisionBox || selectedObjectDetail ? 'flex-[2]' : 'flex-1'} bg-gradient-to-br from-slate-700/40 via-indigo-800/30 to-slate-700/40 backdrop-blur-sm rounded-3xl shadow-2xl border-2 ${isConnectorMode ? 'border-purple-400/50' : 'border-indigo-400/30'} p-8 relative overflow-hidden transition-all duration-300`}
-            onMouseMove={handleDragConnectionMove}
-            onMouseUp={(e) => {
-              console.log('📋 Board mouseUp', { isDraggingConnection, draggedPlayer });
-              
-              // Handle connection dragging
+            onMouseDown={(e) => {
+              if (gameBoardRef.current) {
+                const boardRect = gameBoardRef.current.getBoundingClientRect();
+                const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+                const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+                console.log('🖱️ GLOBAL Board mouseDown at:', mouseX.toFixed(2), mouseY.toFixed(2));
+                console.log('   Target element:', e.target);
+                console.log('   Target tagName:', (e.target as any).tagName);
+                console.log('   Target className:', (e.target as any).className);
+              }
+            }}
+            onMouseMove={(e) => {
+              // Handle connection curve dragging (existing connections)
+              if (draggedConnection) {
+                console.log('📋 Board mouseMove - connection drag detected', draggedConnection);
+                handleMouseMove(e);
+                return; // Don't handle other drag operations
+              }
+              // Handle new connection creation
               if (isDraggingConnection) {
-                // Check if we're over a player by finding the element at mouse position
-                const elements = document.elementsFromPoint(e.clientX, e.clientY);
-                const playerElement = elements.find(el => el.getAttribute('data-player-id'));
-                const targetPlayerId = playerElement?.getAttribute('data-player-id');
-                
-                console.log('🔍 Found player at mouse position:', targetPlayerId);
-                handleEndDragConnection(targetPlayerId || undefined);
-                return; // Don't continue to other logic
+                handleDragConnectionMove(e);
+              }
+            }}
+            onMouseUp={(e) => {
+              console.log('📋 Board mouseUp', { draggedConnection, draggedPlayer, refDraggedConnection: draggedConnectionRef.current });
+              
+              // Handle connection dragging - Check BOTH state and ref!
+              if (draggedConnection || draggedConnectionRef.current) {
+                console.log('✅ Connection drag detected in board mouseUp, skipping handleMouseUp');
+                // Don't call handleMouseUp - let global handler deal with it
+                e.stopPropagation();
+                return;
               }
               
               // Always call handleMouseUp for player/process step dragging
@@ -2684,7 +3497,59 @@ const GameBoard: React.FC<GameBoardProps> = ({
           ) : (
             <>
           {/* SVG for connections */}
-          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ zIndex: 16, pointerEvents: 'auto' }}>
+          <svg 
+            className="absolute inset-0 w-full h-full" 
+            viewBox="0 0 100 100" 
+            preserveAspectRatio="none" 
+            style={{ zIndex: 30, pointerEvents: 'none' }}
+            onMouseDown={(e) => {
+              // Only handle if clicking directly on SVG (not on a child element)
+              if ((e.target as any).tagName === 'svg') {
+                console.log('🎨 SVG mouseDown - checking for nearby connections');
+                
+                if (gameBoardRef.current) {
+                  const boardRect = gameBoardRef.current.getBoundingClientRect();
+                  const clickX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+                  const clickY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+                  
+                  // Check all connections to see if click is near any of them
+                  const allConnections = getConnections();
+                  for (const conn of allConnections) {
+                    // We'll check if the click is close enough to start dragging
+                    // For now, just log that we're checking
+                    console.log('  Checking connection from', conn.from, 'to', conn.to);
+                  }
+                  
+                  // If no connection path caught the event, maybe start dragging the nearest one
+                  console.log('  No path element was clicked - you clicked on empty SVG space');
+                }
+              }
+            }}
+            onMouseMove={(e) => {
+              // Wenn ein Verbindungsende gezogen wird, aktualisiere Position
+              if (draggedConnectionEnd) {
+                handleMouseMove(e as any);
+              }
+              // Wenn die gesamte Verbindung gezogen wird (bestehende Verbindung verschieben)
+              if (draggedConnection) {
+                console.log('🎨 SVG mouseMove - calling handleMouseMove for connection drag');
+                handleMouseMove(e as any);
+              }
+            }}
+            onMouseUp={(e) => {
+              // Wenn ein Verbindungsende gezogen wird, behandle es hier
+              if (draggedConnectionEnd) {
+                e.stopPropagation();
+                handleMouseUp(e as any);
+              }
+              // Wenn die gesamte Verbindung gezogen wird, auch hier behandeln
+              if (draggedConnection) {
+                e.stopPropagation();
+                console.log('🎨 SVG mouseUp - connection drag detected');
+                handleMouseUp(e as any);
+              }
+            }}
+          >
             <defs>
               {players.map((player) => (
                 <marker
@@ -2742,102 +3607,10 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 ? getPlayerPosition(fromPlayer, fromPlayerIndex, players.length)
                 : conn.cards[0]?.openEndPosition || { x: 30, y: 30 }; // Default Position links oben
               
-              // Wenn kein Empfänger: zeichne Linie ins Leere (gleicher Stil wie normale Verbindung)
+              // Verbindung ohne Empfänger: Einfache gerade Linie (wird später außerhalb SVG gerendert)
               if (!conn.to) {
-                // Verwende gespeicherte Position falls vorhanden, sonst default 20% nach rechts
-                const firstCard = conn.cards[0];
-                const toPos = firstCard.openEndPosition 
-                  ? firstCard.openEndPosition 
-                  : { x: fromPlayerPos.x + 20, y: fromPlayerPos.y };
-                
-                const startPort = fromPlayer 
-                  ? getPlayerPortPosition(fromPlayerPos, toPos, true)
-                  : fromPlayerPos;
-                const endPort = { x: toPos.x, y: toPos.y };
-                
-                // Gleiche Kurven-Berechnung wie bei normalen Verbindungen
-                const { controlX, controlY } = calculateCurveControlPoint(
-                  fromPlayerPos,
-                  toPos,
-                  conn.from,
-                  'open-end'
-                );
-                
-                const path = `M ${startPort.x} ${startPort.y} Q ${controlX} ${controlY} ${endPort.x} ${endPort.y}`;
-                const isSelected = selectedConnection?.from === conn.from && !selectedConnection?.to;
-                const isHovered = hoveredConnection?.from === conn.from && !hoveredConnection?.to;
-                const lineColor = fromPlayer?.color || '#888888'; // Grau als Fallback
-                
-                return (
-                  <g key={`${conn.from}-open`} style={{ pointerEvents: 'auto' }}>
-                    {/* Invisible wider path for easier clicking */}
-                    <path
-                      d={path}
-                      stroke="transparent"
-                      strokeWidth="20"
-                      fill="none"
-                      style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedConnectionDetail({ 
-                          from: conn.from, 
-                          to: undefined,
-                          x: e.clientX,
-                          y: e.clientY
-                        });
-                      }}
-                      onMouseEnter={() => setHoveredConnection({ from: conn.from, to: undefined })}
-                      onMouseLeave={() => setHoveredConnection(null)}
-                    />
-                    
-                    {/* Main connection line */}
-                    <path
-                      d={path}
-                      stroke={lineColor}
-                      strokeWidth={isSelected ? "1.2" : isHovered ? "1.0" : "0.6"}
-                      fill="none"
-                      opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
-                      style={{ pointerEvents: 'none' }}
-                    />
-                    
-                    {/* Offener Kreis am Ende statt Pfeil - ziehbar */}
-                    <circle
-                      cx={endPort.x}
-                      cy={endPort.y}
-                      r="2"
-                      fill={lineColor}
-                      stroke="white"
-                      strokeWidth="0.3"
-                      opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
-                      style={{ cursor: 'grab', pointerEvents: 'auto' }}
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        console.log('🎯 Dragging open end of connection');
-                        setIsDraggingConnection(true);
-                        setDragConnectionFrom(conn.from);
-                      }}
-                    />
-                    
-                    {/* Offener Kreis am Anfang - ziehbar (wenn kein fromPlayer) */}
-                    {!fromPlayer && (
-                      <circle
-                        cx={startPort.x}
-                        cy={startPort.y}
-                        r="2"
-                        fill={lineColor}
-                        stroke="white"
-                        strokeWidth="0.3"
-                        opacity={isSelected ? "1" : isHovered ? "0.9" : "0.7"}
-                        style={{ cursor: 'grab', pointerEvents: 'auto' }}
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          console.log('🎯 Dragging start of free connection');
-                          // TODO: Implement dragging start point
-                        }}
-                      />
-                    )}
-                  </g>
-                );
+                // Skip rendering in SVG - we'll render these as HTML elements below
+                return null;
               }
               
               const toPlayer = players.find(p => p.id === conn.to);
@@ -2851,16 +3624,38 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 : { x: 30, y: 30 }; // Default Position für freie Verbindungen
               const toPos = getPlayerPosition(toPlayer, toIndex, players.length);
               
+              // Check if we're currently dragging THIS connection
+              const isDraggingThisConn = draggedConnection?.from === conn.from && 
+                (draggedConnection.to === conn.to || (!draggedConnection.to && !conn.to));
+              
+              // Apply offset to move entire connection (saved + current drag)
+              const savedOffset = conn.cards[0]?.connectionOffset || { x: 0, y: 0 };
+              const currentOffset = isDraggingThisConn ? connectionDragOffset : { x: 0, y: 0 };
+              const totalOffset = {
+                x: savedOffset.x + currentOffset.x,
+                y: savedOffset.y + currentOffset.y
+              };
+              
+              let adjustedFromPos = {
+                x: fromPos.x + totalOffset.x,
+                y: fromPos.y + totalOffset.y
+              };
+              let adjustedToPos = {
+                x: toPos.x + totalOffset.x,
+                y: toPos.y + totalOffset.y
+              };
+              
               // Get port positions (lines start/end at ports, not center)
-              const startPort = getPlayerPortPosition(fromPos, toPos, true);
-              const endPort = getPlayerPortPosition(fromPos, toPos, false);
+              const startPort = getPlayerPortPosition(adjustedFromPos, adjustedToPos, true);
+              const endPort = getPlayerPortPosition(adjustedFromPos, adjustedToPos, false);
               
               // Use helper function to calculate curve
               const { controlX, controlY } = calculateCurveControlPoint(
-                fromPos,
-                toPos,
+                adjustedFromPos,
+                adjustedToPos,
                 conn.from,
-                conn.to
+                conn.to,
+                conn.cards[0]?.curveOffset
               );
               
               const path = `M ${startPort.x} ${startPort.y} Q ${controlX} ${controlY} ${endPort.x} ${endPort.y}`;
@@ -2877,7 +3672,29 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     stroke="transparent"
                     strokeWidth="20"
                     fill="none"
-                    style={{ cursor: selectedCommObject ? 'copy' : 'pointer', pointerEvents: 'stroke' }}
+                    style={{ cursor: selectedCommObject ? 'copy' : 'move', pointerEvents: 'stroke' }}
+                    onMouseDown={(e) => {
+                      // If communication object is selected, don't start dragging
+                      if (selectedCommObject) return;
+                      
+                      console.log('🎯 MouseDown on NORMAL connection path - starting drag');
+                      e.stopPropagation();
+                      const connData = { from: conn.from, to: conn.to };
+                      console.log('🔗 Setting draggedConnection to:', connData);
+                      
+                      // Calculate mouse position relative to board
+                      if (gameBoardRef.current) {
+                        const boardRect = gameBoardRef.current.getBoundingClientRect();
+                        const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+                        const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+                        setConnectionDragStart({ x: mouseX, y: mouseY });
+                        connectionDragStartRef.current = { x: mouseX, y: mouseY };
+                      }
+                      
+                      setDraggedConnection(connData);
+                      draggedConnectionRef.current = connData;
+                      console.log('✅ Refs set from NORMAL path - draggedConnectionRef.current:', draggedConnectionRef.current);
+                    }}
                     onClick={(e) => {
                       console.log('CONNECTION CLICKED!', 'from:', conn.from, 'to:', conn.to);
                       e.stopPropagation();
@@ -2939,6 +3756,98 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       pointerEvents: 'none',
                     }}
                   />
+                  
+                  {/* Drag-Handle in der Mitte der Verbindung */}
+                  {(() => {
+                    const isDraggingThisConnection = draggedConnection?.from === conn.from && 
+                      (draggedConnection.to === conn.to || (!draggedConnection.to && !conn.to));
+                    
+                    return (
+                      <g>
+                        {/* TEST: Sichtbarer roter Test-Kreis um zu sehen ob klickbar */}
+                        <circle
+                          cx={controlX}
+                          cy={controlY}
+                          r="5"
+                          fill="red"
+                          fillOpacity="0.3"
+                          style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                          onClick={() => console.log('🔴 TEST: Roter Kreis geklickt!')}
+                        />
+                        {/* Unsichtbarer großer Klickbereich - VIEL GRÖSSER für bessere UX */}
+                        <circle
+                          cx={controlX}
+                          cy={controlY}
+                          r="8"
+                          fill="transparent"
+                          style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                          onMouseDown={(e) => {
+                            console.log('🎯 DRAG HANDLE MOUSE DOWN TRIGGERED!');
+                            e.stopPropagation();
+                            const connData = { from: conn.from, to: conn.to };
+                            console.log('🖱️ Mouse down on connection drag handle:', connData);
+                            
+                            // Calculate mouse position relative to board
+                            if (gameBoardRef.current) {
+                              const boardRect = gameBoardRef.current.getBoundingClientRect();
+                              const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+                              const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+                              setConnectionDragStart({ x: mouseX, y: mouseY });
+                              connectionDragStartRef.current = { x: mouseX, y: mouseY };
+                            }
+                            
+                            setDraggedConnection(connData);
+                            draggedConnectionRef.current = connData; // Set ref immediately
+                            console.log('✅ draggedConnection and ref set to:', connData);
+                          }}
+                        />
+                        {/* Äußerer Ring - DEUTLICH SICHTBAR */}
+                        <circle
+                          cx={controlX}
+                          cy={controlY}
+                          r={isDraggingThisConnection ? "4" : isHovered ? "3.5" : "3"}
+                          fill="white"
+                          fillOpacity={isHovered || isDraggingThisConnection ? "0.7" : "0.5"}
+                          className="transition-all"
+                          style={{ pointerEvents: 'none' }}
+                        />
+                        {/* Mittlerer Ring - DEUTLICH SICHTBAR */}
+                        <circle
+                          cx={controlX}
+                          cy={controlY}
+                          r={isDraggingThisConnection ? "2.8" : isHovered ? "2.5" : "2.2"}
+                          fill="white"
+                          fillOpacity={isHovered || isDraggingThisConnection ? "0.8" : "0.6"}
+                          className="transition-all"
+                          style={{ pointerEvents: 'none' }}
+                        />
+                        {/* Innerer Punkt - DEUTLICH SICHTBAR */}
+                        <circle
+                          cx={controlX}
+                          cy={controlY}
+                          r={isDraggingThisConnection ? "1.8" : isHovered ? "1.5" : "1.3"}
+                          fill="white"
+                          fillOpacity={isDraggingThisConnection ? "1" : isHovered ? "0.95" : "0.85"}
+                          stroke={fromPlayer?.color || '#888888'}
+                          strokeWidth="0.4"
+                          className="transition-all"
+                          style={{ pointerEvents: 'none' }}
+                        />
+                        {/* Pulsierender Effekt beim Dragging */}
+                        {isDraggingThisConnection && (
+                          <circle
+                            cx={controlX}
+                            cy={controlY}
+                            r="3.5"
+                            fill="white"
+                            fillOpacity="0.4"
+                            className="animate-ping"
+                            style={{ pointerEvents: 'none' }}
+                          />
+                        )}
+                      </g>
+                    );
+                  })()}
                   
                   {/* Ziehbarer Start-Handle wenn kein fromPlayer */}
                   {!fromPlayer && (
@@ -3151,15 +4060,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
             const fromPos = getPlayerPosition(fromPlayer, fromIndex, players.length);
             const toPos = getPlayerPosition(toPlayer, toIndex, players.length);
             
+            // Get firstCard BEFORE using it
+            const firstCard = conn.cards[0];
+            
             // Use helper function to calculate curve (same logic as line drawing)
             const { controlX, controlY } = calculateCurveControlPoint(
               fromPos,
               toPos,
               conn.from,
-              conn.to || 'open-end'
+              conn.to || 'open-end',
+              firstCard?.curveOffset
             );
-            
-            const firstCard = conn.cards[0];
             const commObjectIds = firstCard?.communicationObjectIds || [];
             const commObjects = commObjectIds
               .map(id => processObjects.find(obj => obj.id === id))
@@ -3475,7 +4386,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         className="w-24 h-24 rounded-full flex items-center justify-center text-4xl relative overflow-hidden"
                         style={{
                           backgroundColor: player.color,
-                          boxShadow: isConnectorStarter
+                          boxShadow: snapTargetPlayerId === player.id
+                            ? `0 6px 16px rgba(0,0,0,0.3), 0 0 0 6px #22c55e, 0 0 20px 8px rgba(34, 197, 94, 0.4), inset 0 -4px 8px rgba(0,0,0,0.15), inset 0 2px 8px rgba(255,255,255,0.2)`
+                            : isConnectorStarter
                             ? `0 6px 16px rgba(0,0,0,0.3), 0 0 0 4px #a855f7, inset 0 -4px 8px rgba(0,0,0,0.15), inset 0 2px 8px rgba(255,255,255,0.2)`
                             : isConnectorEmpfaenger
                             ? `0 6px 16px rgba(0,0,0,0.3), 0 0 0 4px #ec4899, inset 0 -4px 8px rgba(0,0,0,0.15), inset 0 2px 8px rgba(255,255,255,0.2)`
@@ -3511,26 +4424,49 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         }}
                       />
                       
-                      {/* Connection Port (Orange-style) - Right side */}
+                      {/* Connection Port - Right side (für FreeLine erstellen) */}
                       <div
-                        className="absolute -right-1 top-1/2 -translate-y-1/2 w-4 h-4 bg-purple-500 rounded-full flex items-center justify-center transition-all cursor-pointer hover:scale-125 shadow-lg border-2 border-white group-hover:opacity-100 opacity-60"
-                        style={{ pointerEvents: 'auto' }}
+                        className="absolute -right-1 top-1/2 -translate-y-1/2 w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center transition-all cursor-pointer hover:scale-125 shadow-lg border-2 border-white opacity-70 hover:opacity-100"
+                        style={{ pointerEvents: 'auto', zIndex: 25 }}
                         onMouseDown={(e) => {
                           e.stopPropagation();
-                          handleStartDragConnection(e, player.id);
+                          
+                          if (!player.position) return;
+                          
+                          // Erstelle neue FreeLine vom Spieler und starte sofort das Dragging des Endpunkts
+                          const newLineData = {
+                            startPosition: { x: player.position.x, y: player.position.y },
+                            endPosition: { x: player.position.x, y: player.position.y },
+                            startPlayerId: player.id,
+                            color: player.color,
+                            thickness: 2,
+                            style: 'solid' as const
+                          };
+                          
+                          onAddFreeLine(newLineData);
+                          
+                          // Setze einen temporären State, um nach der nächsten Render-Zyklen die neue Linie zu finden und zu draggen
+                          // Dies wird im nächsten Frame ausgeführt, wenn freeLines aktualisiert ist
+                          requestAnimationFrame(() => {
+                            // Finde die gerade erstellte Linie (neueste mit diesem Spieler als Start)
+                            const sortedLines = [...freeLines].sort((a, b) => b.timestamp - a.timestamp);
+                            const newLine = sortedLines.find(l => 
+                              l.startPlayerId === player.id && 
+                              Math.abs(l.startPosition.x - player.position!.x) < 0.1 &&
+                              Math.abs(l.startPosition.y - player.position!.y) < 0.1
+                            );
+                            
+                            if (newLine) {
+                              setDraggedPlayer(`freeline-end-${newLine.id}`);
+                              console.log('🎯 FreeLine-Drag gestartet:', newLine.id);
+                            }
+                          });
+                          
+                          console.log('🎯 FreeLine vom Port erstellt:', player.name);
                         }}
-                        title="Verbindung erstellen"
+                        title="Linie ziehen"
                       >
-                        <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
-                      </div>
-                      
-                      {/* Connection Port - Left side (input) */}
-                      <div
-                        className="absolute -left-1 top-1/2 -translate-y-1/2 w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center transition-all shadow-lg border-2 border-white opacity-60 group-hover:opacity-100"
-                        style={{ pointerEvents: 'none' }}
-                        title="Eingang"
-                      >
-                        <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                        <div className="w-2 h-2 bg-white rounded-full"></div>
                       </div>
                     </div>
 
@@ -3723,19 +4659,42 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             return (
                             <div
                               key={step.id}
-                              className={`bg-gradient-to-br from-teal-500 to-teal-600 backdrop-blur rounded-xl p-3 shadow-xl border-2 border-teal-300/50 w-44 cursor-grab active:cursor-grabbing hover:scale-105 hover:shadow-2xl transition-all ${isDragging ? 'opacity-30 scale-95' : ''}`}
+                              className={`group bg-gradient-to-br from-teal-500 to-teal-600 backdrop-blur rounded-xl p-3 shadow-xl border-2 border-teal-300/50 w-44 transition-all relative ${
+                                isDragging ? 'scale-105 shadow-2xl ring-4 ring-teal-400/50' : 'hover:shadow-2xl'
+                              }`}
                               style={{ zIndex: 10 }}
-                              onMouseDown={(e) => {
+                              onDoubleClick={(e) => {
                                 e.stopPropagation();
-                                // Speichere ursprünglichen Zustand
-                                setDraggedProcessStepOriginalState({
-                                  inWaitingArea: step.inWaitingArea || false,
-                                  position: step.position,
-                                  assignedToPlayerId: step.assignedToPlayerId
-                                });
-                                setDraggedProcessStep(step.id);
+                                console.log('📋 Process Step Details:', step);
                               }}
                             >
+                              {/* Drag Handle - Zentraler Punkt */}
+                              <div
+                                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 cursor-grab active:cursor-grabbing z-10"
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                  // Speichere ursprünglichen Zustand
+                                  setDraggedProcessStepOriginalState({
+                                    inWaitingArea: step.inWaitingArea || false,
+                                    position: step.position,
+                                    assignedToPlayerId: step.assignedToPlayerId
+                                  });
+                                  setDraggedProcessStep(step.id);
+                                }}
+                              >
+                                {/* Äußerer Ring */}
+                                <div className="absolute inset-0 rounded-full bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+                                {/* Mittlerer Ring */}
+                                <div className="absolute inset-[5px] rounded-full bg-white/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+                                {/* Innerer Punkt */}
+                                <div className={`absolute inset-[9px] rounded-full bg-white shadow-lg transition-all duration-200 ${
+                                  isDragging ? 'scale-150 bg-teal-200' : 'group-hover:scale-125'
+                                }`}></div>
+                                {/* Pulsierender Effekt beim Dragging */}
+                                {isDragging && (
+                                  <div className="absolute inset-0 rounded-full bg-white/40 animate-ping"></div>
+                                )}
+                              </div>
                               <div className="font-bold text-white text-sm mb-2 leading-tight">
                                 {step.name}
                               </div>
@@ -3779,28 +4738,52 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 return (
                   <div
                     key={`placed-step-${step.id}`}
-                    className="absolute cursor-move group"
+                    className="absolute group"
                     style={{
                       left: `${step.position!.x}%`,
                       top: `${step.position!.y}%`,
                       transform: 'translate(-50%, -50%)',
                       pointerEvents: 'auto',
                       zIndex: isDragging ? 50 : 30,
-                      opacity: isDragging ? 0.5 : 1,
                     }}
-                    onMouseDown={(e) => {
+                    onDoubleClick={(e) => {
                       e.stopPropagation();
-                      // Speichere ursprünglichen Zustand
-                      setDraggedProcessStepOriginalState({
-                        inWaitingArea: step.inWaitingArea || false,
-                        position: step.position,
-                        assignedToPlayerId: step.assignedToPlayerId
-                      });
-                      setDraggedProcessStep(step.id);
-                      setDragPreviewPosition({ x: step.position!.x, y: step.position!.y });
+                      // Doppelklick öffnet Details (später implementieren)
+                      console.log('📋 Process Step Details:', step);
                     }}
                   >
-                    <div className="bg-teal-500/90 backdrop-blur rounded-lg p-3 shadow-xl border-2 border-teal-400/50 w-48 transition-all group-hover:scale-105">
+                    <div className={`bg-teal-500/90 backdrop-blur rounded-lg p-3 shadow-xl border-2 border-teal-400/50 w-48 transition-all ${
+                      isDragging ? 'scale-105 shadow-2xl ring-4 ring-teal-400/50' : 'hover:shadow-2xl'
+                    }`}>
+                      {/* Drag Handle - Zentraler Punkt */}
+                      <div
+                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 cursor-grab active:cursor-grabbing z-10"
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          // Speichere ursprünglichen Zustand
+                          setDraggedProcessStepOriginalState({
+                            inWaitingArea: step.inWaitingArea || false,
+                            position: step.position,
+                            assignedToPlayerId: step.assignedToPlayerId
+                          });
+                          setDraggedProcessStep(step.id);
+                          setDragPreviewPosition({ x: step.position!.x, y: step.position!.y });
+                        }}
+                      >
+                        {/* Äußerer Ring */}
+                        <div className="absolute inset-0 rounded-full bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+                        {/* Mittlerer Ring */}
+                        <div className="absolute inset-[6px] rounded-full bg-white/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+                        {/* Innerer Punkt */}
+                        <div className={`absolute inset-[10px] rounded-full bg-white shadow-lg transition-all duration-200 ${
+                          isDragging ? 'scale-150 bg-teal-200' : 'group-hover:scale-125'
+                        }`}></div>
+                        {/* Pulsierender Effekt beim Dragging */}
+                        {isDragging && (
+                          <div className="absolute inset-0 rounded-full bg-white/40 animate-ping"></div>
+                        )}
+                      </div>
+                      
                       <div className="font-bold text-white text-sm mb-2">{step.name}</div>
                       {step.input && (
                         <div className="text-xs text-teal-100 mb-1.5 flex items-start gap-1">
@@ -3845,6 +4828,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
             {placedCommObjects.map((placed, idx) => {
               const commObj = processObjects.find(obj => obj.id === placed.objectId);
               if (!commObj) return null;
+              
+              const isDragging = draggedCommObject === idx;
 
               return (
                 <div
@@ -3855,32 +4840,50 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     top: `${placed.y}%`,
                     transform: 'translate(-50%, -50%)',
                     pointerEvents: 'auto',
-                    zIndex: 25,
+                    zIndex: isDragging ? 50 : 25,
                   }}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('communicationObjectId', commObj.id);
-                    e.dataTransfer.setData('placedObjectIndex', idx.toString());
-                    e.dataTransfer.effectAllowed = 'move';
-                    setIsDraggingCommObject(true);
-                  }}
-                  onDragEnd={() => {
-                    setIsDraggingCommObject(false);
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    // Doppelklick öffnet Details (später implementieren)
+                    console.log('📧 Communication Object Details:', commObj);
                   }}
                 >
                   <div
-                    className="w-12 h-12 rounded-full flex items-center justify-center text-2xl shadow-lg border-2 transition-all group-hover:scale-110 cursor-move"
+                    className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl shadow-lg border-2 transition-all relative ${
+                      isDragging ? 'scale-110 shadow-2xl ring-4 ring-opacity-50' : 'hover:shadow-xl'
+                    }`}
                     style={{
                       backgroundColor: commObj.color + '40',
                       borderColor: commObj.color,
                     }}
-                    title={`${commObj.name} (Ziehen zum Verschieben)`}
+                    title={commObj.name}
                   >
-                    {commObj.icon}
+                    {/* Drag Handle - Zentraler Punkt */}
+                    <div
+                      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 cursor-grab active:cursor-grabbing z-10"
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setDraggedCommObject(idx);
+                      }}
+                    >
+                      {/* Äußerer Ring */}
+                      <div className="absolute inset-0 rounded-full bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+                      {/* Innerer Punkt */}
+                      <div className={`absolute inset-[8px] rounded-full bg-white shadow-md transition-all duration-200 ${
+                        isDragging ? 'scale-150' : 'group-hover:scale-125'
+                      }`}></div>
+                      {/* Pulsierender Effekt beim Dragging */}
+                      {isDragging && (
+                        <div className="absolute inset-0 rounded-full bg-white/40 animate-ping"></div>
+                      )}
+                    </div>
+                    
+                    {/* Icon */}
+                    <span className="relative z-0">{commObj.icon}</span>
                   </div>
                   {/* Remove button */}
                   <button
-                    className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
                     onClick={(e) => {
                       e.stopPropagation();
                       setPlacedCommObjects(prev => prev.filter((_, i) => i !== idx));
@@ -3893,82 +4896,809 @@ const GameBoard: React.FC<GameBoardProps> = ({
               );
             })}
             
+            {/* Simple straight lines for connections without receiver */}
+            {(() => {
+              const allConnections = getConnections();
+              console.log('🟢 ALL CONNECTIONS:', allConnections.map(c => ({ from: c.from, to: c.to, cards: c.cards.length })));
+              
+              return allConnections.map((conn) => {
+                // Nur rendern wenn KEIN toPlayer existiert
+                const toPlayer = conn.to ? players.find(p => p.id === conn.to) : null;
+                if (toPlayer) return null;
+                
+                const firstCard = conn.cards[0];
+                if (!firstCard) return null;
+                
+                const connectionId = firstCard.id;
+                const fromPlayer = conn.from ? players.find(p => p.id === conn.from) : null;
+                
+                let startX, startY;
+                if (fromPlayer) {
+                  const fromPlayerIndex = players.indexOf(fromPlayer);
+                  const fromPlayerPos = getPlayerPosition(fromPlayer, fromPlayerIndex, players.length);
+                  startX = fromPlayerPos.x;
+                  startY = fromPlayerPos.y;
+                } else {
+                  const savedPos = firstCard.openEndPosition || { x: 20, y: 20 };
+                  startX = savedPos.x;
+                  startY = savedPos.y;
+                }
+                
+                const isDragging = draggedPlayer === `connection-${connectionId}`;
+                
+                let posX, posY;
+                const savedPos = firstCard.openEndPosition;
+                if (savedPos) {
+                  posX = savedPos.x;
+                  posY = savedPos.y;
+                } else {
+                  posX = startX + 30;
+                  posY = startY;
+                }
+                
+                const lineColor = fromPlayer?.color || '#888888';
+                
+                return (
+                  <div
+                    key={connectionId}
+                    className="absolute group"
+                    style={{
+                      left: `${posX}%`,
+                      top: `${posY}%`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: isDragging ? 30 : 18,
+                      pointerEvents: 'auto',
+                      cursor: isDragging ? 'grabbing' : 'grab'
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      console.log('✊ Connection Line mouseDown - aufnehmen', connectionId);
+                      setDraggedPlayer(`connection-${connectionId}`);
+                    }}
+                  >
+                    <svg
+                      className="absolute"
+                      style={{
+                        left: '50%',
+                        top: '50%',
+                        width: '1px',
+                        height: '1px',
+                        overflow: 'visible',
+                        pointerEvents: 'none',
+                        transform: 'translate(-50%, -50%)',
+                      }}
+                    >
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2={(startX - posX) * 10}
+                        y2={(startY - posY) * 10}
+                        stroke={lineColor}
+                        strokeWidth="3"
+                        opacity={isDragging ? 1 : 0.8}
+                      />
+                    </svg>
+                    
+                    <div
+                      className={`rounded-full transition-all ${
+                        isDragging ? 'scale-110' : 'hover:scale-110'
+                      }`}
+                      style={{
+                        width: isDragging ? '30px' : '22px',
+                        height: isDragging ? '30px' : '22px',
+                        backgroundColor: 'white',
+                        border: `3px solid ${lineColor}`,
+                        boxShadow: isDragging 
+                          ? `0 0 20px ${lineColor}80, 0 0 40px ${lineColor}40, 0 0 0 4px ${lineColor}50` 
+                          : '0 2px 8px rgba(0,0,0,0.3)',
+                      }}
+                    />
+                  </div>
+                );
+              })})()}
+            
+            {/* Free Lines - Freie Linien */}
+            {freeLines.map((line) => {
+                            // ...existing code...
+                            const isDraggingStart = draggedPlayer === `freeline-start-${line.id}`;
+                            const isDraggingEnd = draggedPlayer === `freeline-end-${line.id}`;
+                            const isDraggingMiddle = draggedPlayer === `freeline-middle-${line.id}`;
+                            const isDragging = isDraggingStart || isDraggingEnd || isDraggingMiddle;
+                            
+                            // Startposition: Wenn angedockt, folge IMMER dem Spieler (außer wenn diese Linie selbst gedraggt wird)
+                            const startPlayer = line.startPlayerId ? players.find(p => p.id === line.startPlayerId) : null;
+                            const startX = (isDraggingStart || isDraggingMiddle)
+                              ? line.startPosition.x  // Während des Draggings der Linie: Verwende gespeicherte Position
+                              : (startPlayer?.position?.x ?? line.startPosition.x);  // Angedockt: Folge dem Spieler
+                            const startY = (isDraggingStart || isDraggingMiddle)
+                              ? line.startPosition.y
+                              : (startPlayer?.position?.y ?? line.startPosition.y);
+                            
+                            // Endposition: Wenn angedockt, folge IMMER dem Spieler (außer wenn diese Linie selbst gedraggt wird)
+                            const endPlayer = line.endPlayerId ? players.find(p => p.id === line.endPlayerId) : null;
+                            const endX = (isDraggingEnd || isDraggingMiddle)
+                              ? line.endPosition.x  // Während des Draggings der Linie: Verwende gespeicherte Position
+                              : (endPlayer?.position?.x ?? line.endPosition.x);  // Angedockt: Folge dem Spieler
+                            const endY = (isDraggingEnd || isDraggingMiddle)
+                              ? line.endPosition.y
+                              : (endPlayer?.position?.y ?? line.endPosition.y);
+                            // Berechne Mittelpunkt
+                            const midX = (startX + endX) / 2;
+                            const midY = (startY + endY) / 2;
+              
+              return (
+                <React.Fragment key={line.id}>
+                  {/* SVG Line */}
+                  <svg
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      zIndex: isDragging ? 30 : 18,
+                      width: '100%',
+                      height: '100%'
+                    }}
+                  >
+                    <line
+                      x1={`${startX}%`}
+                      y1={`${startY}%`}
+                      x2={`${endX}%`}
+                      y2={`${endY}%`}
+                      stroke={line.color}
+                      strokeWidth={line.thickness || 2}
+                      strokeDasharray={
+                        line.style === 'dashed' ? '10,5' :
+                        line.style === 'dotted' ? '2,3' : 
+                        undefined
+                      }
+                      opacity={isDragging ? 1 : 0.8}
+                    />
+                  </svg>
+                  
+                  {/* Angedockt Indikator am Start */}
+                  {line.startPlayerId && startPlayer && (
+                    <div
+                      className="absolute group"
+                      style={{
+                        left: `${startX}%`,
+                        top: `${startY}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 19,
+                        pointerEvents: 'auto',
+                        cursor: 'pointer',
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Löse Verbindung und setze Position auf aktuelle Spieler-Position
+                        onUpdateFreeLine(line.id, { 
+                          startPlayerId: null as any,
+                          startPosition: { x: startX, y: startY }
+                        });
+                        console.log('🔓 Start-Verbindung gelöst');
+                      }}
+                      title="Rechtsklick zum Lösen"
+                    >
+                      <div
+                        className="rounded-full animate-pulse group-hover:scale-125 transition-transform"
+                        style={{
+                          width: '12px',
+                          height: '12px',
+                          backgroundColor: line.color,
+                          border: '2px solid white',
+                          boxShadow: `0 0 10px ${line.color}80`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Angedockt Indikator am Ende */}
+                  {line.endPlayerId && endPlayer && (
+                    <div
+                      className="absolute group"
+                      style={{
+                        left: `${endX}%`,
+                        top: `${endY}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 19,
+                        pointerEvents: 'auto',
+                        cursor: 'pointer',
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Löse Verbindung und setze Position auf aktuelle Spieler-Position
+                        onUpdateFreeLine(line.id, { 
+                          endPlayerId: null as any,
+                          endPosition: { x: endX, y: endY }
+                        });
+                        console.log('🔓 End-Verbindung gelöst');
+                      }}
+                      title="Rechtsklick zum Lösen"
+                    >
+                      <div
+                        className="rounded-full animate-pulse group-hover:scale-125 transition-transform"
+                        style={{
+                          width: '12px',
+                          height: '12px',
+                          backgroundColor: line.color,
+                          border: '2px solid white',
+                          boxShadow: `0 0 10px ${line.color}80`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Middle Handle - für gesamte Linie verschieben */}
+                  <div
+                    className="absolute group"
+                    style={{
+                      left: `${midX}%`,
+                      top: `${midY}%`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: isDraggingMiddle ? 30 : 19,
+                      pointerEvents: 'auto',
+                      cursor: isDraggingMiddle ? 'grabbing' : 'move'
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setDraggedPlayer(`freeline-middle-${line.id}`);
+                    }}
+                  >
+                    <div
+                      className={`rounded-lg transition-all ${
+                        isDraggingMiddle ? 'scale-125' : 'group-hover:scale-110'
+                      }`}
+                      style={{
+                        width: isDraggingMiddle ? '32px' : '24px',
+                        height: isDraggingMiddle ? '24px' : '18px',
+                        backgroundColor: line.color,
+                        border: '2px solid white',
+                        boxShadow: isDraggingMiddle 
+                          ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30` 
+                          : '0 2px 8px rgba(0,0,0,0.3)',
+                        opacity: isDraggingMiddle ? 1 : 0.9,
+                      }}
+                    />
+                  </div>
+                  
+                  {/* Start Point Handle - immer anzeigen */}
+                  <div
+                    className="absolute"
+                    style={{
+                      left: `${startX}%`,
+                      top: `${startY}%`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: isDraggingStart ? 30 : (line.startPlayerId ? 19 : 18),
+                      pointerEvents: 'auto',
+                      cursor: isDraggingStart ? 'grabbing' : 'grab'
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      // Wenn angedockt, löse Verbindung und setze Position
+                      if (line.startPlayerId) {
+                        const currentX = startPlayer?.position?.x || line.startPosition.x;
+                        const currentY = startPlayer?.position?.y || line.startPosition.y;
+                        onUpdateFreeLine(line.id, { 
+                          startPlayerId: null as any,
+                          startPosition: { x: currentX, y: currentY }
+                        });
+                      }
+                      setDraggedPlayer(`freeline-start-${line.id}`);
+                    }}
+                  >
+                    <div
+                      className={`rounded-full transition-all ${
+                        isDraggingStart ? 'scale-125' : 'hover:scale-110'
+                      }`}
+                      style={{
+                        width: isDraggingStart ? '20px' : '16px',
+                        height: isDraggingStart ? '20px' : '16px',
+                        backgroundColor: line.color,
+                        border: '2px solid white',
+                        boxShadow: isDraggingStart 
+                          ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30` 
+                          : '0 2px 8px rgba(0,0,0,0.3)',
+                      }}
+                    />
+                  </div>
+                  
+                  {/* End Point Handle - immer anzeigen */}
+                  <div
+                    className="absolute"
+                    style={{
+                      left: `${endX}%`,
+                      top: `${endY}%`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: isDraggingEnd ? 30 : (line.endPlayerId ? 19 : 18),
+                      pointerEvents: 'auto',
+                      cursor: isDraggingEnd ? 'grabbing' : 'grab'
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      // Wenn angedockt, löse Verbindung und setze Position
+                      if (line.endPlayerId) {
+                        const currentX = endPlayer?.position?.x || line.endPosition.x;
+                        const currentY = endPlayer?.position?.y || line.endPosition.y;
+                        onUpdateFreeLine(line.id, { 
+                          endPlayerId: null as any,
+                          endPosition: { x: currentX, y: currentY }
+                        });
+                      }
+                      setDraggedPlayer(`freeline-end-${line.id}`);
+                    }}
+                  >
+                    <div
+                      className={`rounded-full transition-all ${
+                        isDraggingEnd ? 'scale-125' : 'hover:scale-110'
+                      }`}
+                      style={{
+                        width: isDraggingEnd ? '20px' : '16px',
+                        height: isDraggingEnd ? '20px' : '16px',
+                        backgroundColor: line.color,
+                        border: '2px solid white',
+                        boxShadow: isDraggingEnd 
+                          ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30` 
+                          : '0 2px 8px rgba(0,0,0,0.3)',
+                      }}
+                    />
+                  </div>
+                </React.Fragment>
+              );
+            })}
+            
+            {/* Decision Lines - Entscheidungslinien mit Box in der Mitte */}
+            {decisionLines.map((line) => {
+              const isDraggingBox = draggedPlayer === `decisionline-box-${line.id}`;
+              const isDraggingStart = draggedPlayer === `decisionline-start-${line.id}`;
+              const isDraggingOption1 = draggedPlayer === `decisionline-option1-${line.id}`;
+              const isDraggingOption2 = draggedPlayer === `decisionline-option2-${line.id}`;
+              
+              // Spieler finden
+              const startPlayer = line.startPlayerId ? players.find(p => p.id === line.startPlayerId) : null;
+              const option1Player = line.option1PlayerId ? players.find(p => p.id === line.option1PlayerId) : null;
+              const option2Player = line.option2PlayerId ? players.find(p => p.id === line.option2PlayerId) : null;
+              
+              // Positionen berechnen (folge Spielern wenn angedockt)
+              const startX = (isDraggingStart || !startPlayer?.position) ? line.startPosition.x : startPlayer.position.x;
+              const startY = (isDraggingStart || !startPlayer?.position) ? line.startPosition.y : startPlayer.position.y;
+              
+              const option1X = (isDraggingOption1 || !option1Player?.position) ? line.option1Position.x : option1Player.position.x;
+              const option1Y = (isDraggingOption1 || !option1Player?.position) ? line.option1Position.y : option1Player.position.y;
+              
+              const option2X = (isDraggingOption2 || !option2Player?.position) ? line.option2Position.x : option2Player.position.x;
+              const option2Y = (isDraggingOption2 || !option2Player?.position) ? line.option2Position.y : option2Player.position.y;
+              
+              const boxX = isDraggingBox ? line.decisionBoxPosition.x : line.decisionBoxPosition.x;
+              const boxY = isDraggingBox ? line.decisionBoxPosition.y : line.decisionBoxPosition.y;
+              
+              return (
+                <React.Fragment key={line.id}>
+                  {/* SVG Linien */}
+                  <svg
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      zIndex: 17,
+                      width: '100%',
+                      height: '100%'
+                    }}
+                  >
+                    {/* Linie vom Start zur Box */}
+                    <line
+                      x1={`${startX}%`}
+                      y1={`${startY}%`}
+                      x2={`${boxX}%`}
+                      y2={`${boxY}%`}
+                      stroke={line.color}
+                      strokeWidth="3"
+                      opacity="0.8"
+                    />
+                    {/* Linie von Box zu Option 1 */}
+                    <line
+                      x1={`${boxX}%`}
+                      y1={`${boxY}%`}
+                      x2={`${option1X}%`}
+                      y2={`${option1Y}%`}
+                      stroke={line.color}
+                      strokeWidth="3"
+                      opacity="0.8"
+                    />
+                    {/* Linie von Box zu Option 2 */}
+                    <line
+                      x1={`${boxX}%`}
+                      y1={`${boxY}%`}
+                      x2={`${option2X}%`}
+                      y2={`${option2Y}%`}
+                      stroke={line.color}
+                      strokeWidth="3"
+                      opacity="0.8"
+                    />
+                  </svg>
+                  
+                  {/* Minimalist Decision Box in der Mitte */}
+                  <div
+                    className="absolute group"
+                    style={{
+                      left: `${boxX}%`,
+                      top: `${boxY}%`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: isDraggingBox ? 30 : 20,
+                      pointerEvents: 'auto',
+                      cursor: isDraggingBox ? 'grabbing' : 'move'
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setDraggedPlayer(`decisionline-box-${line.id}`);
+                    }}
+                    title={line.question || 'Entscheidung'}
+                  >
+                    <div
+                      className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg border-2 border-white transition-all ${
+                        isDraggingBox ? 'scale-125' : 'hover:scale-110'
+                      }`}
+                      style={{
+                        backgroundColor: line.color,
+                        boxShadow: isDraggingBox 
+                          ? `0 0 30px ${line.color}90, 0 0 60px ${line.color}40`
+                          : `0 4px 12px rgba(0,0,0,0.3), 0 0 15px ${line.color}50`,
+                      }}
+                    >
+                      <span className="text-2xl">?</span>
+                    </div>
+                    
+                    {/* Delete button */}
+                    <button
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg border-2 border-white"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveDecisionLine(line.id);
+                      }}
+                      style={{ pointerEvents: 'auto', zIndex: 31 }}
+                      title="Löschen"
+                    >
+                      <X className="w-3 h-3 text-white" />
+                    </button>
+                  </div>
+                  
+                  {/* Angedockt-Indikatoren und Handles */}
+                  {/* Start Handle */}
+                  {startPlayer && (
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${startX}%`,
+                        top: `${startY}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 19,
+                        pointerEvents: 'auto',
+                      }}
+                      title={`Angedockt an ${startPlayer.name}`}
+                    >
+                      <div
+                        className="rounded-full animate-pulse"
+                        style={{
+                          width: '12px',
+                          height: '12px',
+                          backgroundColor: startPlayer.color,
+                          border: '2px solid white',
+                          boxShadow: `0 0 10px ${startPlayer.color}80`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Option 1 Handle */}
+                  {option1Player && (
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${option1X}%`,
+                        top: `${option1Y}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 19,
+                        pointerEvents: 'auto',
+                      }}
+                      title={`${line.option1Label || 'Option 1'} - ${option1Player.name}`}
+                    >
+                      <div
+                        className="rounded-full animate-pulse"
+                        style={{
+                          width: '12px',
+                          height: '12px',
+                          backgroundColor: option1Player.color,
+                          border: '2px solid white',
+                          boxShadow: `0 0 10px ${option1Player.color}80`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Option 2 Handle */}
+                  {option2Player && (
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${option2X}%`,
+                        top: `${option2Y}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 19,
+                        pointerEvents: 'auto',
+                      }}
+                      title={`${line.option2Label || 'Option 2'} - ${option2Player.name}`}
+                    >
+                      <div
+                        className="rounded-full animate-pulse"
+                        style={{
+                          width: '12px',
+                          height: '12px',
+                          backgroundColor: option2Player.color,
+                          border: '2px solid white',
+                          boxShadow: `0 0 10px ${option2Player.color}80`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Draggable Endpoints - nur wenn NICHT angedockt */}
+                  {!startPlayer && (
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${startX}%`,
+                        top: `${startY}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: isDraggingStart ? 30 : 18,
+                        pointerEvents: 'auto',
+                        cursor: isDraggingStart ? 'grabbing' : 'grab'
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDraggedPlayer(`decisionline-start-${line.id}`);
+                      }}
+                    >
+                      <div
+                        className={`rounded-full transition-all ${
+                          isDraggingStart ? 'scale-125' : 'hover:scale-110'
+                        }`}
+                        style={{
+                          width: isDraggingStart ? '20px' : '16px',
+                          height: isDraggingStart ? '20px' : '16px',
+                          backgroundColor: line.color,
+                          border: '2px solid white',
+                          boxShadow: isDraggingStart 
+                            ? `0 0 20px ${line.color}80`
+                            : '0 2px 8px rgba(0,0,0,0.3)',
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {!option1Player && (
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${option1X}%`,
+                        top: `${option1Y}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: isDraggingOption1 ? 30 : 18,
+                        pointerEvents: 'auto',
+                        cursor: isDraggingOption1 ? 'grabbing' : 'grab'
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDraggedPlayer(`decisionline-option1-${line.id}`);
+                      }}
+                    >
+                      <div
+                        className={`rounded-full transition-all ${
+                          isDraggingOption1 ? 'scale-125' : 'hover:scale-110'
+                        }`}
+                        style={{
+                          width: isDraggingOption1 ? '20px' : '16px',
+                          height: isDraggingOption1 ? '20px' : '16px',
+                          backgroundColor: line.color,
+                          border: '2px solid white',
+                          boxShadow: isDraggingOption1 
+                            ? `0 0 20px ${line.color}80`
+                            : '0 2px 8px rgba(0,0,0,0.3)',
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {!option2Player && (
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${option2X}%`,
+                        top: `${option2Y}%`,
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: isDraggingOption2 ? 30 : 18,
+                        pointerEvents: 'auto',
+                        cursor: isDraggingOption2 ? 'grabbing' : 'grab'
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDraggedPlayer(`decisionline-option2-${line.id}`);
+                      }}
+                    >
+                      <div
+                        className={`rounded-full transition-all ${
+                          isDraggingOption2 ? 'scale-125' : 'hover:scale-110'
+                        }`}
+                        style={{
+                          width: isDraggingOption2 ? '20px' : '16px',
+                          height: isDraggingOption2 ? '20px' : '16px',
+                          backgroundColor: line.color,
+                          border: '2px solid white',
+                          boxShadow: isDraggingOption2 
+                            ? `0 0 20px ${line.color}80`
+                            : '0 2px 8px rgba(0,0,0,0.3)',
+                        }}
+                      />
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            
             {/* Decision Boxes */}
             {decisionBoxes.map((decisionBox) => {
               const fromPlayer = decisionBox.fromPlayerId ? players.find(p => p.id === decisionBox.fromPlayerId) : null;
+              const dockedPlayer = decisionBox.dockedToPlayerId ? players.find(p => p.id === decisionBox.dockedToPlayerId) : null;
               
               const isDraggingDecision = draggedPlayer === `decision-${decisionBox.id}`;
               
+              // Wenn angedockt, folge der Spieler-Position (außer während des Draggings dieser Box)
+              const posX = (isDraggingDecision || !dockedPlayer?.position) 
+                ? decisionBox.position.x 
+                : dockedPlayer.position.x;
+              const posY = (isDraggingDecision || !dockedPlayer?.position) 
+                ? decisionBox.position.y 
+                : dockedPlayer.position.y;
+              
               return (
-                <div
-                  key={decisionBox.id}
-                  className="absolute group"
-                  style={{
-                    left: `${decisionBox.position.x}%`,
-                    top: `${decisionBox.position.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    zIndex: isDraggingDecision ? 30 : 18,
-                    pointerEvents: 'auto',
-                    cursor: isDraggingDecision ? 'grabbing' : 'grab'
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    
-                    // Wenn bereits am Ziehen: Platzieren an dieser Position
-                    if (isDraggingDecision) {
-                      setDraggedPlayer(null);
-                      console.log('📍 Decision Box platziert an', decisionBox.position);
-                    } else {
-                      // Sonst: Zum Ziehen aufnehmen
-                      setDraggedPlayer(`decision-${decisionBox.id}`);
-                      console.log('✊ Decision Box aufgenommen');
-                    }
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    // Nur öffnen wenn nicht am Ziehen
-                    if (!isDraggingDecision) {
-                      setInspectedDecisionBox(decisionBox.id);
-                    }
-                  }}
-                >
-                  {/* Diamond-shaped decision box */}
-                  <div className="relative">
-                    {/* Main diamond */}
-                    <div 
-                      className="w-16 h-16 bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500 transform rotate-45 rounded shadow-xl border-2 border-white/50 hover:scale-110 transition-all"
+                <React.Fragment key={decisionBox.id}>
+                  {/* Verbindungslinie zum angedockten Spieler (wie bei freien Linien) */}
+                  {decisionBox.dockedToPlayerId && dockedPlayer?.position && (
+                    <svg
+                      className="absolute inset-0 pointer-events-none"
                       style={{
-                        boxShadow: isDraggingDecision 
-                          ? '0 8px 24px rgba(251, 191, 36, 0.6), 0 0 0 3px rgba(251, 191, 36, 0.3)' 
-                          : '0 4px 12px rgba(0,0,0,0.3), 0 2px 6px rgba(251, 191, 36, 0.4)',
+                        zIndex: 17,
+                        width: '100%',
+                        height: '100%'
                       }}
-                      title={decisionBox.question}
                     >
-                      {/* Subtle gradient overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent rounded opacity-60"></div>
-                      
-                      {/* Icon container (counter-rotated) */}
-                      <div className="absolute inset-0 flex items-center justify-center transform -rotate-45">
-                        <span className="text-2xl drop-shadow-md">❓</span>
-                      </div>
-                    </div>
-                    
-                    {/* Question label on hover */}
-                    <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 w-40">
-                      <div className="bg-slate-900/95 backdrop-blur-xl text-white text-[10px] px-2.5 py-1.5 rounded-md shadow-xl border border-white/20 text-center font-semibold">
-                        {decisionBox.question}
-                      </div>
-                    </div>
-                    
-                    {/* Option labels around the diamond */}
-                    {decisionBox.options.map((option, index) => {
-                      const angle = (360 / decisionBox.options.length) * index + 90;
-                      const radius = 50;
-                      const x = Math.cos((angle * Math.PI) / 180) * radius;
-                      const y = Math.sin((angle * Math.PI) / 180) * radius;
-                      
-                      return (
+                      <line
+                        x1={`${dockedPlayer.position.x}%`}
+                        y1={`${dockedPlayer.position.y}%`}
+                        x2={`${posX}%`}
+                        y2={`${posY}%`}
+                        stroke={dockedPlayer.color}
+                        strokeWidth="3"
+                        strokeDasharray="5,5"
+                        opacity="0.6"
+                      />
+                    </svg>
+                  )}
+                  
+                  <div
+                    className="absolute group"
+                    style={{
+                      left: `${posX}%`,
+                      top: `${posY}%`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: isDraggingDecision ? 30 : 18,
+                      pointerEvents: 'auto',
+                      cursor: isDraggingDecision ? 'grabbing' : 'grab'
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      console.log('✊ Decision Box mouseDown - aufnehmen', decisionBox.id);
+                      setDraggedPlayer(`decision-${decisionBox.id}`);
+                    }}
+                    onContextMenu={(e) => {
+                      // Rechtsklick: Andocken lösen
+                      if (decisionBox.dockedToPlayerId) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDecisionBoxes(prev => prev.map(box => 
+                          box.id === decisionBox.id 
+                            ? { ...box, dockedToPlayerId: undefined }
+                            : box
+                        ));
+                        console.log('🔓 Decision Box von Spieler gelöst');
+                      }
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      // Nur öffnen wenn nicht am Ziehen
+                      if (!isDraggingDecision) {
+                        setInspectedDecisionBox(decisionBox.id);
+                      }
+                    }}
+                  >
+                    {/* Angedockt-Indikator - größer und auffälliger wie bei freien Linien */}
+                    {decisionBox.dockedToPlayerId && dockedPlayer && (
+                      <div
+                        className="absolute -top-3 -right-3 z-10 group/dock"
+                        style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                        title="Rechtsklick zum Lösen"
+                      >
                         <div
+                          className="rounded-full animate-pulse group-hover/dock:scale-125 transition-transform"
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            backgroundColor: dockedPlayer.color,
+                            border: '2px solid white',
+                            boxShadow: `0 0 15px ${dockedPlayer.color}90, 0 0 5px white`,
+                          }}
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Diamond-shaped decision box */}
+                    <div className="relative">
+                      {/* Main diamond */}
+                      <div 
+                        className={`w-20 h-20 bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500 transform rotate-45 rounded-lg shadow-xl border-3 ${
+                          decisionBox.dockedToPlayerId ? 'border-white' : 'border-white/50'
+                        } transition-all ${
+                          isDraggingDecision ? 'scale-110' : 'hover:scale-105'
+                        }`}
+                        style={{
+                          boxShadow: isDraggingDecision 
+                            ? '0 15px 40px rgba(251, 191, 36, 0.9), 0 0 0 5px rgba(251, 191, 36, 0.6)' 
+                            : decisionBox.dockedToPlayerId && dockedPlayer
+                            ? `0 6px 20px rgba(0,0,0,0.4), 0 0 20px ${dockedPlayer.color}70, 0 0 40px ${dockedPlayer.color}30`
+                            : '0 6px 15px rgba(0,0,0,0.3), 0 2px 8px rgba(251, 191, 36, 0.5)',
+                          borderWidth: '3px',
+                        }}
+                        title={decisionBox.question}
+                      >
+                        {/* Subtle gradient overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent rounded-lg opacity-70"></div>
+                        
+                        {/* Glow effect when docked */}
+                        {decisionBox.dockedToPlayerId && (
+                          <div 
+                            className="absolute inset-0 rounded-lg animate-pulse"
+                            style={{
+                              background: `radial-gradient(circle at center, ${dockedPlayer?.color}30, transparent)`,
+                            }}
+                          />
+                        )}
+                        
+                        {/* Icon container (counter-rotated) */}
+                        <div className="absolute inset-0 flex items-center justify-center transform -rotate-45">
+                          <span className="text-3xl drop-shadow-lg filter brightness-110">❓</span>
+                        </div>
+                      </div>
+                      
+                      {/* Question label on hover */}
+                      <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 w-48">
+                        <div className="bg-slate-900/95 backdrop-blur-xl text-white text-xs px-3 py-2 rounded-lg shadow-2xl border border-white/30 text-center font-semibold">
+                          {decisionBox.question}
+                        </div>
+                      </div>
+                      
+                      {/* Option labels around the diamond */}
+                      {decisionBox.options.map((option, index) => {
+                        const angle = (360 / decisionBox.options.length) * index + 90;
+                        const radius = 60;
+                        const x = Math.cos((angle * Math.PI) / 180) * radius;
+                        const y = Math.sin((angle * Math.PI) / 180) * radius;
+                        
+                        return (
+                          <div
                           key={option.label}
                           className="absolute opacity-0 group-hover:opacity-100 transition-opacity"
                           style={{
@@ -3992,16 +5722,18 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   
                   {/* Remove button */}
                   <button
-                    className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg border border-white"
+                    className="absolute -top-3 -left-3 w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg border-2 border-white"
                     onClick={(e) => {
                       e.stopPropagation();
                       setDecisionBoxes(prev => prev.filter(d => d.id !== decisionBox.id));
                     }}
                     style={{ pointerEvents: 'auto', zIndex: 30 }}
+                    title="Löschen"
                   >
-                    <X className="w-3 h-3 text-white" />
+                    <X className="w-3.5 h-3.5 text-white" />
                   </button>
                 </div>
+              </React.Fragment>
               );
             })}
             </div>
@@ -4009,8 +5741,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
             {/* Empty state */}
             {players.filter(p => p.onBoard !== false).length === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 5 }}>
-                <div className="text-center">
+              <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 5, pointerEvents: 'none' }}>
+                <div className="text-center" style={{ pointerEvents: 'auto' }}>
                   <div className="w-20 h-20 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
                     <Users className="w-12 h-12 text-indigo-400" />
                   </div>
@@ -4981,23 +6713,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   players={players}
                   onAddCard={onAddCard}
                   onAddPlayer={onAddPlayer}
-                  onAddDecision={() => {
-                    const decisionId = `decision-${Date.now()}`;
-                    const centerX = 50;
-                    const centerY = 50;
-                    const newDecisionBox = {
-                      id: decisionId,
-                      question: 'Neue Entscheidung',
-                      fromPlayerId: '',
-                      options: [
-                        { label: 'Option 1', toPlayerId: '', description: '', color: '#10B981' },
-                        { label: 'Option 2', toPlayerId: '', description: '', color: '#F59E0B' }
-                      ],
-                      position: { x: centerX, y: centerY },
-                      type: 'binary' as const
-                    };
-                    setDecisionBoxes(prev => [...prev, newDecisionBox]);
-                  }}
+                  onAddFreeLine={onAddFreeLine}
+                  onAddDecisionLine={onAddDecisionLine}
                 />
               </div>
             </div>
