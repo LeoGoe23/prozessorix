@@ -56,7 +56,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
   onUpdateProcessObject,
   onAddFreeLine,
   onUpdateFreeLine,
-  onRemoveFreeLine,
   onAddDecisionLine,
   onUpdateDecisionLine,
   onRemoveDecisionLine,
@@ -110,7 +109,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
   
   const draggedConnection = draggedConnectionState;
   
-  const [connectionDragStart, setConnectionDragStart] = React.useState<{ x: number; y: number } | null>(null);
   const [connectionDragOffset, setConnectionDragOffset] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
   
   // Process Step Detail View
@@ -369,7 +367,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
         // Reset and warn user
         console.error('❌ Cannot save - draggedConnection was lost!');
         setConnectionDragOffset({ x: 0, y: 0 });
-        setConnectionDragStart(null);
         document.body.style.cursor = '';
         return;
       }
@@ -417,7 +414,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
       
       // Reset drag state - keep offset briefly to prevent jump
       setDraggedConnection(null);
-      setConnectionDragStart(null);
       // Clear refs manually
       draggedConnectionRef.current = null;
       connectionDragStartRef.current = null;
@@ -1072,23 +1068,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
     }
   };
 
-  const handleStartDragConnection = (e: React.MouseEvent, playerId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    console.log('🚀 START drag connection from', playerId);
-    
-    const boardRect = gameBoardRef.current?.getBoundingClientRect();
-    if (!boardRect) return;
-    
-    setIsDraggingConnection(true);
-    setDragConnectionFrom(playerId);
-    setDragConnectionPosition({
-      x: ((e.clientX - boardRect.left) / boardRect.width) * 100,
-      y: ((e.clientY - boardRect.top) / boardRect.height) * 100
-    });
-  };
-
   const handleDragConnectionMove = (e: React.MouseEvent) => {
     if (!isDraggingConnection || !gameBoardRef.current) return;
     
@@ -1097,78 +1076,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
       x: ((e.clientX - boardRect.left) / boardRect.width) * 100,
       y: ((e.clientY - boardRect.top) / boardRect.height) * 100
     });
-  };
-
-  const handleEndDragConnection = (targetPlayerId?: string) => {
-    console.log('🎯 handleEndDragConnection called', { isDraggingConnection, dragConnectionFrom, targetPlayerId, dragConnectionPosition });
-    
-    if (!isDraggingConnection || !dragConnectionFrom) {
-      setIsDraggingConnection(false);
-      setDragConnectionFrom(null);
-      setDragConnectionPosition(null);
-      return;
-    }
-    
-    const fromPlayer = players.find(p => p.id === dragConnectionFrom);
-    if (!fromPlayer) {
-      setIsDraggingConnection(false);
-      setDragConnectionFrom(null);
-      setDragConnectionPosition(null);
-      return;
-    }
-    
-    // Wenn Ziel ein Spieler ist, erstelle direkt eine Prozesslinie
-    if (targetPlayerId) {
-      const toPlayer = players.find(p => p.id === targetPlayerId);
-      
-      if (toPlayer && onAddCard) {
-        // Erstelle eine einfache Prozessverbindung
-        onAddCard(
-          `Prozess: ${fromPlayer.name} → ${toPlayer.name}`,
-          dragConnectionFrom,
-          targetPlayerId,
-          '', // medium
-          '', // duration
-          '' // description
-        );
-      }
-    } else {
-      // Ins Leere gezogen - erstelle Prozess-Karte ohne Empfänger MIT Position
-      if (onAddCard && dragConnectionPosition) {
-        const endPosition = { x: dragConnectionPosition.x, y: dragConnectionPosition.y };
-        const fromPlayerName = fromPlayer ? fromPlayer.name : 'Unbekannt';
-        console.log('📍 Erstelle freien Prozessschritt von', fromPlayerName, 'zu Position:', endPosition);
-        
-        onAddCard(
-          fromPlayer ? `Prozess von ${fromPlayerName}` : 'Freier Prozess',
-          dragConnectionFrom,
-          '', // kein Empfänger
-          '', // medium
-          '', // duration
-          '' // description
-        );
-        
-        // Speichere die Position des offenen Endes
-        // Finde die gerade erstellte Card (neueste ohne toPlayerId von diesem fromPlayerId)
-        setTimeout(() => {
-          const newCard = cards
-            .filter(c => c.fromPlayerId === dragConnectionFrom && !c.toPlayerId)
-            .sort((a, b) => b.timestamp - a.timestamp)[0];
-          
-          if (newCard && onUpdateCard) {
-            console.log('💾 Speichere openEndPosition:', endPosition);
-            onUpdateCard(newCard.id, {
-              openEndPosition: endPosition
-            });
-          }
-        }, 100);
-      }
-    }
-    
-    // Reset
-    setIsDraggingConnection(false);
-    setDragConnectionFrom(null);
-    setDragConnectionPosition(null);
   };
 
   const handlePlayerContextClick = (e: React.MouseEvent, playerId: string) => {
@@ -1392,9 +1299,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
       const newEndY = Math.max(8, Math.min(92, line.endPosition.y + deltaY));
       
       // Check for nearby players for start and end points (in pixel space)
-      const mousePixelX = e.clientX;
-      const mousePixelY = e.clientY;
-      
       const startPixelX = (newStartX / 100) * boardRect.width + boardRect.left;
       const startPixelY = (newStartY / 100) * boardRect.height + boardRect.top;
       const endPixelX = (newEndX / 100) * boardRect.width + boardRect.left;
@@ -2075,10 +1979,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
       console.log('🖱️ MouseUp mit Prozessschritt:', currentDraggedProcessStep);
       console.log('📍 Ursprünglicher Zustand:', draggedProcessStepOriginalState);
       
-      const mouseX = e.clientX;
-      const mouseY = e.clientY;
-      const boardRect = gameBoardRef.current.getBoundingClientRect();
-      
       const player = players.find(p => p.id === currentDraggedPlayer);
       if (!player) return;
 
@@ -2137,7 +2037,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
     setDraggedConnectionEnd(null);
     setDraggedCommObject(null);
     setDraggedConnection(null);
-    setConnectionDragStart(null);
     setConnectionDragOffset({ x: 0, y: 0 });
   };
 
@@ -3508,10 +3407,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 console.log('🎨 SVG mouseDown - checking for nearby connections');
                 
                 if (gameBoardRef.current) {
-                  const boardRect = gameBoardRef.current.getBoundingClientRect();
-                  const clickX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
-                  const clickY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
-                  
                   // Check all connections to see if click is near any of them
                   const allConnections = getConnections();
                   for (const conn of allConnections) {
@@ -3601,12 +3496,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
             {getConnections().map((conn) => {
               const fromPlayer = players.find(p => p.id === conn.from);
               
-              // Wenn kein Sender (freie Verbindung), verwende Standardposition
-              const fromPlayerIndex = fromPlayer ? players.indexOf(fromPlayer) : -1;
-              const fromPlayerPos = fromPlayer 
-                ? getPlayerPosition(fromPlayer, fromPlayerIndex, players.length)
-                : conn.cards[0]?.openEndPosition || { x: 30, y: 30 }; // Default Position links oben
-              
               // Verbindung ohne Empfänger: Einfache gerade Linie (wird später außerhalb SVG gerendert)
               if (!conn.to) {
                 // Skip rendering in SVG - we'll render these as HTML elements below
@@ -3687,7 +3576,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         const boardRect = gameBoardRef.current.getBoundingClientRect();
                         const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
                         const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
-                        setConnectionDragStart({ x: mouseX, y: mouseY });
                         connectionDragStartRef.current = { x: mouseX, y: mouseY };
                       }
                       
@@ -3792,7 +3680,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                               const boardRect = gameBoardRef.current.getBoundingClientRect();
                               const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
                               const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
-                              setConnectionDragStart({ x: mouseX, y: mouseY });
                               connectionDragStartRef.current = { x: mouseX, y: mouseY };
                             }
                             
