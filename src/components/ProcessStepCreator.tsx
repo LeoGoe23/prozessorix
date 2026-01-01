@@ -96,7 +96,11 @@ const ProcessStepCreator: React.FC<ProcessStepCreatorProps> = ({
                     className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
                     style={{ backgroundColor: player.color }}
                   >
-                    {player.icon}
+                      {(typeof player.icon === 'string' && (player.icon.includes('/') || player.icon.startsWith('http') || player.icon.startsWith('data:'))) ? (
+                      <img src={player.icon} alt="icon" className="max-w-[60%] max-h-[60%] object-contain mx-auto" />
+                    ) : (
+                      player.icon
+                    )}
                   </div>
                   <div className="flex-1 text-left">
                     <div className="font-medium text-white">{player.name}</div>
@@ -132,7 +136,11 @@ const ProcessStepCreator: React.FC<ProcessStepCreatorProps> = ({
                       className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
                       style={{ backgroundColor: player.color }}
                     >
-                      {player.icon}
+                      {(typeof player.icon === 'string' && (player.icon.includes('/') || player.icon.startsWith('http') || player.icon.startsWith('data:'))) ? (
+                        <img src={player.icon} alt="icon" className="max-w-[60%] max-h-[60%] object-contain mx-auto" />
+                      ) : (
+                        player.icon
+                      )}
                     </div>
                     <div className="flex-1 text-left">
                       <div className="font-medium text-white">{player.name}</div>

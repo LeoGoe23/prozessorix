@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
 import { Player, ProcessCard, PLAYER_COLORS, PLAYER_ICONS, DEFAULT_ROLES } from '../types/game';
+import img1 from '../assets/image1.png';
+import img2 from '../assets/image2.png';
+import img3 from '../assets/image3.png';
+import img4 from '../assets/image4.png';
+import img5 from '../assets/image5.png';
+import img6 from '../assets/image6.png';
+import img7 from '../assets/image7.png';
 import { GitBranch, User, ArrowRight, CheckCircle, Users } from 'lucide-react';
 
 interface PlayerViewProps {
@@ -65,7 +72,14 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     return ['💼', '👤', '📊', '💻', '🎯'];
   };
 
-  const filteredIcons = role ? getIconsForRole(role) : ['💼', '👤', '📊', '💻', '🎯'];
+  const uploadedIcons = [img1, img2, img3, img4, img5, img6, img7];
+  const filteredIcons = role ? [...getIconsForRole(role), ...uploadedIcons] : ['💼', '👤', '📊', '💻', '🎯', ...uploadedIcons];
+
+  const renderIcon = (icon: string | undefined | null) => {
+    if (!icon) return null;
+    const isImage = typeof icon === 'string' && (icon.includes('/') || icon.startsWith('data:') || icon.startsWith('http'));
+    return isImage ? <img src={icon} alt="icon" className="max-w-[60%] max-h-[60%] object-contain mx-auto" /> : <>{icon}</>;
+  };
 
   // Registration
   const handleRegister = () => {
@@ -213,7 +227,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                           : 'bg-slate-700/50 border border-slate-600 hover:bg-slate-600/50 hover:scale-105'
                       }`}
                     >
-                      {icon}
+                      {renderIcon(icon)}
                     </button>
                   ))}
                 </div>
@@ -279,7 +293,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
               className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-lg"
               style={{ backgroundColor: myPlayer.color }}
             >
-              {myPlayer.icon}
+              {renderIcon(myPlayer.icon)}
             </div>
             <div>
               <div className="font-bold text-white text-lg">{myPlayer.name}</div>
@@ -600,7 +614,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                                         className="w-5 h-5 rounded flex items-center justify-center text-xs"
                                         style={{ backgroundColor: toPlayer.color }}
                                       >
-                                        {toPlayer.icon}
+                                        {renderIcon(toPlayer.icon)}
                                       </div>
                                       <span className="font-medium">{toPlayer.name}</span>
                                     </div>
@@ -709,7 +723,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                           className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-md flex-shrink-0"
                           style={{ backgroundColor: player.color }}
                         >
-                          {player.icon}
+                          {renderIcon(player.icon)}
                         </div>
                         <div className="flex-1 text-left min-w-0">
                           <div className="font-semibold text-white truncate">{player.name}</div>
@@ -793,7 +807,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                                 className="w-6 h-6 rounded flex items-center justify-center text-sm"
                                 style={{ backgroundColor: toPlayer.color }}
                               >
-                                {toPlayer.icon}
+                                {renderIcon(toPlayer.icon)}
                               </div>
                               <span className="text-white font-medium text-sm">{toPlayer.name}</span>
                               <span className="text-gray-400 text-xs">({toPlayer.role})</span>
@@ -856,7 +870,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                       className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl shadow-lg"
                       style={{ backgroundColor: player.color }}
                     >
-                      {player.icon}
+                      {renderIcon(player.icon)}
                     </div>
                     <div>
                       <h2 className="text-2xl font-bold text-white">{player.name}</h2>
@@ -1012,7 +1026,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                           className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
                           style={{ backgroundColor: fromPlayer.color }}
                         >
-                          {fromPlayer.icon}
+                          {renderIcon(fromPlayer.icon)}
                         </div>
                         <div>
                           <div className="font-medium text-white">{fromPlayer.name}</div>
@@ -1032,7 +1046,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                           className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
                           style={{ backgroundColor: toPlayer.color }}
                         >
-                          {toPlayer.icon}
+                          {renderIcon(toPlayer.icon)}
                         </div>
                         <div>
                           <div className="font-medium text-white">{toPlayer.name}</div>

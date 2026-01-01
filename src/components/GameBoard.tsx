@@ -220,6 +220,24 @@ const GameBoard: React.FC<GameBoardProps> = ({
   React.useEffect(() => {
     playersRef.current = players;
   }, [players]);
+
+  const playersByNewest = React.useMemo(() => {
+    return [...players].sort((a, b) => {
+      try {
+        const ta = parseInt(String(a.id).split('-')[1] || '0', 10);
+        const tb = parseInt(String(b.id).split('-')[1] || '0', 10);
+        return tb - ta; // newest first
+      } catch (e) {
+        return 0;
+      }
+    });
+  }, [players]);
+
+  const renderIcon = (icon?: string | null) => {
+    if (!icon) return null;
+    const isImage = typeof icon === 'string' && (icon.includes('/') || icon.startsWith('data:') || icon.startsWith('http'));
+    return isImage ? <img src={icon} alt="icon" className="max-w-[60%] max-h-[60%] object-contain mx-auto" /> : <>{icon}</>;
+  };
   
   // Effect: Aktualisiere angedockte Decision Boxes wenn Spieler bewegt werden
   React.useEffect(() => {
@@ -538,7 +556,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const handleAutoLayout = () => {
-    const playersOnBoard = players.filter(p => p.onBoard !== false);
+    const playersOnBoard = playersByNewest.filter(p => p.onBoard !== false);
     
     if (playersOnBoard.length === 0) {
       alert('Keine Spieler auf dem Board zum Anordnen!');
@@ -587,7 +605,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
   const handleAddTestProcesses = () => {
     // Hole die vier Spieler (oder die ersten vier verfügbaren)
-    const availablePlayers = players.filter(p => p.onBoard !== false);
+    const availablePlayers = playersByNewest.filter(p => p.onBoard !== false);
     if (availablePlayers.length < 4) {
       alert('Bitte füge zuerst mindestens 4 Spieler hinzu!');
       return;
@@ -690,7 +708,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
   const handleAddSwimlaneTest = () => {
     // Prüfe ob schon Spieler vorhanden sind
-    let testPlayers = players.filter(p => p.onBoard !== false);
+    let testPlayers = playersByNewest.filter(p => p.onBoard !== false);
     
     // Falls keine Spieler vorhanden sind, erstelle Test-Spieler
     if (testPlayers.length < 4) {
@@ -2185,7 +2203,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   // Render swimlane view with horizontal lanes
   const renderSwimlaneView = () => {
     const connections = getConnections();
-    const activePlayers = players.filter(p => p.onBoard !== false);
+    const activePlayers = playersByNewest.filter(p => p.onBoard !== false);
     
     // Sort connections chronologically
     const sortedConnections = [...connections].sort((a, b) => {
@@ -2373,8 +2391,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     boxShadow: `0 8px 24px ${player.color}60`
                   }}
                 >
-                  <div className="text-center">
-                    <div className="text-3xl mb-1">{player.icon}</div>
+                    <div className="text-center">
+                    <div className="text-3xl mb-1">{renderIcon(player.icon)}</div>
                     <div className="text-xs font-bold text-white line-clamp-1">
                       {player.name}
                     </div>
@@ -2733,8 +2751,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       boxShadow: `0 8px 24px ${player.color}40`
                     }}
                   >
-                    <div className="text-center">
-                      <div className="text-2xl mb-2">{player.icon}</div>
+                      <div className="text-center">
+                      <div className="text-2xl mb-2">{renderIcon(player.icon)}</div>
                       <div className="text-xs font-bold text-white mb-2 line-clamp-2">
                         {lastCard?.text || 'Prozessschritt'}
                       </div>
@@ -3109,7 +3127,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 
                 <button
                   onClick={handleAutoLayout}
-                  disabled={players.filter(p => p.onBoard !== false).length === 0}
+                  disabled={playersByNewest.filter(p => p.onBoard !== false).length === 0}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left group disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center group-hover:bg-purple-500/30 transition-colors">
@@ -3172,7 +3190,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
                 <button
                   onClick={handleAddTestProcesses}
-                  disabled={players.filter(p => p.onBoard !== false).length < 4}
+                  disabled={playersByNewest.filter(p => p.onBoard !== false).length < 4}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed group"
                 >
                   <div className="w-10 h-10 bg-cyan-500/20 rounded-lg flex items-center justify-center group-hover:bg-cyan-500/30 transition-colors">
@@ -3186,7 +3204,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
                 <button
                   onClick={handleAddSwimlaneTest}
-                  disabled={players.filter(p => p.onBoard !== false).length < 4}
+                  disabled={playersByNewest.filter(p => p.onBoard !== false).length < 4}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed group"
                 >
                   <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center group-hover:bg-blue-500/30 transition-colors">
@@ -3472,7 +3490,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               if (!fromPlayer) return null;
               
               const fromIndex = players.indexOf(fromPlayer);
-              const fromPos = getPlayerPosition(fromPlayer, fromIndex, players.filter(p => p.onBoard !== false).length);
+              const fromPos = getPlayerPosition(fromPlayer, fromIndex, playersByNewest.filter(p => p.onBoard !== false).length);
               
               // Get port position for drag start
               const startPort = getPlayerPortPosition(fromPos, dragConnectionPosition, true);
@@ -4162,7 +4180,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       }}
                     >
                       <div className="relative z-10 drop-shadow-lg">
-                        {player.icon}
+                        {renderIcon(player.icon)}
                       </div>
                     </div>
                     <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 text-center whitespace-nowrap">
@@ -4219,8 +4237,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
               );
             })()}
             
-            {players.filter(p => p.onBoard !== false).map((player, index) => {
-              const onBoardPlayers = players.filter(p => p.onBoard !== false);
+            {playersByNewest.filter(p => p.onBoard !== false).map((player, index) => {
+              const onBoardPlayers = playersByNewest.filter(p => p.onBoard !== false);
               const pos = getPlayerPosition(player, index, onBoardPlayers.length);
               
               const isFromPlayer = selectedFromPlayer === player.id;
@@ -4296,7 +4314,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         
                         {/* Icon mit leichtem Schatten */}
                         <div className="relative z-10 drop-shadow-lg" data-player-id={player.id} style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }}>
-                          {player.icon}
+                          {renderIcon(player.icon)}
                         </div>
                       </div>
                       
@@ -5627,7 +5645,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
             {/* End of Zoom and Pan Transform Container */}
 
             {/* Empty state */}
-            {players.filter(p => p.onBoard !== false).length === 0 && (
+            {playersByNewest.filter(p => p.onBoard !== false).length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 5, pointerEvents: 'none' }}>
                 <div className="text-center" style={{ pointerEvents: 'auto' }}>
                   <div className="w-20 h-20 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -5673,7 +5691,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl shadow-lg"
                       style={{ backgroundColor: player.color }}
                     >
-                      {player.icon}
+                      {renderIcon(player.icon)}
                     </div>
                     <div>
                       <h2 className="text-2xl font-bold text-white">{player.name}</h2>
@@ -6431,7 +6449,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
           {isBottomPanelExpanded && (
             <div className="grid grid-cols-3 gap-4">
               {/* Wartebereich für Spieler - immer sichtbar, nimmt 2 Spalten */}
-              <div className={`col-span-2 bg-slate-800/50 backdrop-blur-sm rounded-2xl shadow-xl border-2 ${players.filter(p => p.onBoard === false).length > 0 ? 'border-amber-400/30' : 'border-gray-500/20'} p-6`}>
+              <div className={`col-span-2 bg-slate-800/50 backdrop-blur-sm rounded-2xl shadow-xl border-2 ${playersByNewest.filter(p => p.onBoard === false).length > 0 ? 'border-amber-400/30' : 'border-gray-500/20'} p-6`}>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
                     <Users className="w-6 h-6 text-amber-400" />
@@ -6440,19 +6458,19 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     <h3 className="text-base font-bold text-white flex items-center gap-2">
                       Spieler
                       <span className="text-xs font-normal text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full">
-                        {players.filter(p => p.onBoard === false).length}
+                        {playersByNewest.filter(p => p.onBoard === false).length}
                       </span>
                     </h3>
                     <p className="text-sm text-gray-400">
-                      {players.filter(p => p.onBoard === false).length > 0 
+                      {playersByNewest.filter(p => p.onBoard === false).length > 0 
                         ? 'Ziehe sie aufs Spielfeld' 
                         : 'Alle Spieler sind auf dem Spielfeld'}
                     </p>
                   </div>
                 </div>
-                {players.filter(p => p.onBoard === false).length > 0 ? (
+                {playersByNewest.filter(p => p.onBoard === false).length > 0 ? (
                   <div className="flex gap-6 overflow-x-auto pb-2">
-                    {players.filter(p => p.onBoard === false).map((player) => {
+                    {playersByNewest.filter(p => p.onBoard === false).map((player) => {
                       const isDragging = draggedPlayer === player.id;
                       const isInspected = inspectedPlayer === player.id;
                       
@@ -6497,7 +6515,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                                 handleMouseDown(e, player.id);
                               }}
                             >
-                              {player.icon}
+                              {renderIcon(player.icon)}
                             </div>
                             <div className="text-xs font-semibold text-white text-center max-w-[70px] truncate">{player.name}</div>
                             <div
@@ -6626,139 +6644,145 @@ const GameBoard: React.FC<GameBoardProps> = ({
           }}
         >
           <div 
-            className="bg-slate-800 rounded-2xl shadow-2xl border border-white/10 max-w-md w-full p-6"
+            className="bg-slate-800 rounded-2xl shadow-2xl border border-white/10 max-w-4xl w-full p-6 max-h-[80vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Neuer Spieler</h2>
-              <button
-                onClick={() => {
-                  setShowPlayerModal(false);
-                  setCurrentName('');
-                  setCurrentRole('');
-                  setCurrentIcon(PLAYER_ICONS[0]);
-                  setCurrentInput('');
-                  setCurrentOutput('');
-                  setCurrentMedium('');
-                  setCurrentProcessRole('');
-                }}
-                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-400" />
-              </button>
-            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-white">Neuer Spieler</h2>
+                  <button
+                    onClick={() => {
+                      setShowPlayerModal(false);
+                      setCurrentName('');
+                      setCurrentRole('');
+                      setCurrentIcon(PLAYER_ICONS[0]);
+                      setCurrentInput('');
+                      setCurrentOutput('');
+                      setCurrentMedium('');
+                      setCurrentProcessRole('');
+                    }}
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
-                <input
-                  type="text"
-                  placeholder="z.B. Anna"
-                  value={currentName}
-                  onChange={(e) => setCurrentName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && currentRole && handleAddPlayer()}
-                  className="w-full px-4 py-3 bg-slate-700/50 border-2 border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white placeholder-gray-500"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Rolle</label>
-                <input
-                  type="text"
-                  placeholder="z.B. Entwickler"
-                  value={currentRole}
-                  onChange={(e) => setCurrentRole(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && currentName && handleAddPlayer()}
-                  className="w-full px-4 py-3 bg-slate-700/50 border-2 border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white placeholder-gray-500"
-                />
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {DEFAULT_ROLES.map((role) => (
-                    <button
-                      key={role}
-                      onClick={() => setCurrentRole(role)}
-                      className="px-3 py-1.5 text-xs bg-slate-700/50 hover:bg-slate-600/50 text-gray-300 rounded-lg transition-colors border border-white/10"
-                    >
-                      {role}
-                    </button>
-                  ))}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
+                  <input
+                    type="text"
+                    placeholder="z.B. Anna"
+                    value={currentName}
+                    onChange={(e) => setCurrentName(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && currentRole && handleAddPlayer()}
+                    className="w-full px-4 py-3 bg-slate-700/50 border-2 border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white placeholder-gray-500"
+                    autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Rolle</label>
+                  <input
+                    type="text"
+                    placeholder="z.B. Entwickler"
+                    value={currentRole}
+                    onChange={(e) => setCurrentRole(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && currentName && handleAddPlayer()}
+                    className="w-full px-4 py-3 bg-slate-700/50 border-2 border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white placeholder-gray-500"
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {DEFAULT_ROLES.map((role) => (
+                      <button
+                        key={role}
+                        onClick={() => setCurrentRole(role)}
+                        className="px-3 py-1.5 text-xs bg-slate-700/50 hover:bg-slate-600/50 text-gray-300 rounded-lg transition-colors border border-white/10"
+                      >
+                        {role}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Zusätzliche Informationen */}
+                <div className="border-t border-white/10 pt-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-white mb-2">Zusätzliche Informationen (optional)</h3>
+                  
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1">
+                      Input - Was kommt rein?
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="z.B. Kundenanfrage, E-Mail, Bestellung"
+                      value={currentInput}
+                      onChange={(e) => setCurrentInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1">
+                      Output - Was geht raus?
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="z.B. Bearbeitete Anfrage, Rechnung"
+                      value={currentOutput}
+                      onChange={(e) => setCurrentOutput(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1">
+                      Medium - Wie?
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="z.B. E-Mail, Telefon, System, persönlich"
+                      value={currentMedium}
+                      onChange={(e) => setCurrentMedium(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1">
+                      Rolle im Prozess
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="z.B. Entscheider, Bearbeiter, Prüfer"
+                      value={currentProcessRole}
+                      onChange={(e) => setCurrentProcessRole(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
+                    />
+                  </div>
                 </div>
               </div>
-              
-              <div>
+
+              <div className="lg:col-span-1">
                 <label className="block text-sm font-medium text-gray-300 mb-2">Icon</label>
-                <div className="max-h-[200px] overflow-y-auto bg-slate-700/30 rounded-lg p-3">
+                <div className="bg-slate-700/30 rounded-lg p-3">
                   <IconPicker 
                     selectedIcon={currentIcon}
                     onSelectIcon={setCurrentIcon}
+                    uploadedFirst={true}
                   />
                 </div>
               </div>
 
-              {/* Zusätzliche Informationen */}
-              <div className="border-t border-white/10 pt-4 space-y-3">
-                <h3 className="text-sm font-semibold text-white mb-2">Zusätzliche Informationen (optional)</h3>
-                
-                <div>
-                  <label className="block text-xs font-medium text-gray-400 mb-1">
-                    Input - Was kommt rein?
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="z.B. Kundenanfrage, E-Mail, Bestellung"
-                    value={currentInput}
-                    onChange={(e) => setCurrentInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-400 mb-1">
-                    Output - Was geht raus?
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="z.B. Bearbeitete Anfrage, Rechnung"
-                    value={currentOutput}
-                    onChange={(e) => setCurrentOutput(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-400 mb-1">
-                    Medium - Wie?
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="z.B. E-Mail, Telefon, System, persönlich"
-                    value={currentMedium}
-                    onChange={(e) => setCurrentMedium(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-400 mb-1">
-                    Rolle im Prozess
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="z.B. Entscheider, Bearbeiter, Prüfer"
-                    value={currentProcessRole}
-                    onChange={(e) => setCurrentProcessRole(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm placeholder-gray-500"
-                  />
-                </div>
+              <div className="lg:col-span-3">
+                <button
+                  onClick={handleAddPlayer}
+                  disabled={!currentName.trim() || !currentRole.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <UserPlus className="w-5 h-5" />
+                  Spieler hinzufügen
+                </button>
               </div>
-              
-              <button
-                onClick={handleAddPlayer}
-                disabled={!currentName.trim() || !currentRole.trim()}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <UserPlus className="w-5 h-5" />
-                Spieler hinzufügen
-              </button>
             </div>
           </div>
         </div>
@@ -6865,7 +6889,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-3">Von (Absender)</label>
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    {players.filter(p => p.onBoard !== false).map((player) => (
+                    {playersByNewest.filter(p => p.onBoard !== false).map((player) => (
                       <button
                         key={player.id}
                         onClick={() => {
@@ -6885,7 +6909,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                           className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shadow-lg"
                           style={{ backgroundColor: player.color }}
                         >
-                          {player.icon}
+                          {renderIcon(player.icon)}
                         </div>
                         <div className="text-left flex-1">
                           <div className="font-medium text-white text-sm">{player.name}</div>
@@ -6899,7 +6923,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-3">An (Empfänger)</label>
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    {players.filter(p => p.onBoard !== false).map((player) => (
+                    {playersByNewest.filter(p => p.onBoard !== false).map((player) => (
                       <button
                         key={player.id}
                         onClick={() => {
@@ -6919,7 +6943,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                           className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shadow-lg"
                           style={{ backgroundColor: player.color }}
                         >
-                          {player.icon}
+                          {renderIcon(player.icon)}
                         </div>
                         <div className="text-left flex-1">
                           <div className="font-medium text-white text-sm">{player.name}</div>
@@ -7117,9 +7141,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
                               className="w-full px-3 py-2 bg-slate-700/50 border border-white/10 rounded-lg focus:border-indigo-500 focus:outline-none text-white text-sm"
                             >
                               <option value="">-- Spieler wählen --</option>
-                              {players.filter(p => p.onBoard !== false).map((player) => (
+                              {playersByNewest.filter(p => p.onBoard !== false).map((player) => (
                                 <option key={player.id} value={player.id}>
-                                  {player.icon} {player.name} ({player.role})
+                                  {(typeof player.icon === 'string' && !(player.icon.includes('/') || player.icon.startsWith('http') || player.icon.startsWith('data:'))) ? player.icon + ' ' : ''}{player.name} ({player.role})
                                 </option>
                               ))}
                             </select>
@@ -7680,8 +7704,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
               </div>
                   
                   {/* Waiting Players */}
-                  {players.filter(p => p.onBoard === false).length > 0 ? (
-                    players.filter(p => p.onBoard === false).map(waitingPlayer => (
+                  {playersByNewest.filter(p => p.onBoard === false).length > 0 ? (
+                    playersByNewest.filter(p => p.onBoard === false).map(waitingPlayer => (
                       <button
                         key={waitingPlayer.id}
                         onClick={() => {
