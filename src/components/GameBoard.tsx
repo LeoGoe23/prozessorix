@@ -1996,54 +1996,67 @@ const GameBoard: React.FC<GameBoardProps> = ({
     if (currentDraggedProcessStep && gameBoardRef.current && onUpdateProcessObject) {
       console.log('🖱️ MouseUp mit Prozessschritt:', currentDraggedProcessStep);
       console.log('📍 Ursprünglicher Zustand:', draggedProcessStepOriginalState);
-      
-      const player = players.find(p => p.id === currentDraggedPlayer);
-      if (!player) return;
 
       // Berechne Drop-Position in Prozent
       const rect = e.currentTarget.getBoundingClientRect();
       const dropX = ((e.clientX - rect.left) / rect.width) * 100;
       const dropY = ((e.clientY - rect.top) / rect.height) * 100;
 
-      // Finde freie Prozessschritte in der Nähe (60px Radius entspricht ~6%)
-      const freeProcessSteps = processObjects.filter(obj => {
-        const step = obj as ProcessStep;
-        return step.category === 'process-step' && 
-               step.position && 
-               !step.assignedToPlayerId;
-      });
+      // Finde Spieler in der Nähe (60px Radius entspricht ~6%)
+      const playersOnBoard = players.filter(p => p.onBoard !== false);
+      
+      let targetPlayer = null;
+      let minPlayerDistance = Infinity;
 
-      let targetProcessStep = null;
-      let minDistance = Infinity;
-
-      for (const obj of freeProcessSteps) {
-        const step = obj as ProcessStep;
-        if (!step.position) continue;
-
-        const dx = step.position.x - dropX;
-        const dy = step.position.y - dropY;
+      for (const player of playersOnBoard) {
+        const playerPos = getPlayerPosition(player, players.indexOf(player), players.length);
+        
+        const dx = playerPos.x - dropX;
+        const dy = playerPos.y - dropY;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance < 6 && distance < minDistance) {
-          minDistance = distance;
-          targetProcessStep = step;
+        if (distance < 8 && distance < minPlayerDistance) {
+          minPlayerDistance = distance;
+          targetPlayer = player;
         }
       }
 
-      if (targetProcessStep) {
-        // Erstelle Prozess-Karte: vom Prozessschritt zum Spieler
-        console.log('🔗 Verknüpfe freien Prozessschritt mit Spieler', targetProcessStep.name, '→', player.name);
+      if (targetPlayer) {
+        // Prozessschritt an Spieler andocken
+        console.log('🔗 Docke Prozessschritt an Spieler an:', currentDraggedProcessStep, '→', targetPlayer.name);
         
-        // Neue Prozess-Karte erstellen (mit onAddCard, nicht onAddProcessObject)
-        if (onAddCard) {
-          onAddCard(
-            `${targetProcessStep.name} → ${player.name}`,
-            targetProcessStep.id, // fromPlayerId
-            player.id, // toPlayerId
-            '', // medium
-            '', // duration
-            '' // description
-          );
+        const processStep = processObjects.find(obj => obj.id === currentDraggedProcessStep) as ProcessStep;
+        
+        if (processStep) {
+          onUpdateProcessObject(currentDraggedProcessStep, {
+            assignedToPlayerId: targetPlayer.id,
+            inWaitingArea: false,
+            position: undefined, // Position wird nicht mehr benötigt, da er am Spieler hängt
+          });
+        }
+      } else {
+        // Wenn kein Spieler in der Nähe: Prozessschritt auf dem Board platzieren oder zurück in Wartebox
+        const processStep = processObjects.find(obj => obj.id === currentDraggedProcessStep) as ProcessStep;
+        
+        if (processStep && draggedProcessStepOriginalState) {
+          // Prüfe ob der Drop auf dem Board erfolgte
+          if (dropX >= 5 && dropX <= 95 && dropY >= 5 && dropY <= 95) {
+            // Auf dem Board platzieren
+            console.log('📍 Platziere Prozessschritt auf dem Board:', dropX, dropY);
+            onUpdateProcessObject(currentDraggedProcessStep, {
+              position: { x: dropX, y: dropY },
+              inWaitingArea: false,
+              assignedToPlayerId: undefined,
+            });
+          } else {
+            // Zurück zum ursprünglichen Zustand
+            console.log('↩️ Prozessschritt zurück zum ursprünglichen Zustand');
+            onUpdateProcessObject(currentDraggedProcessStep, {
+              position: draggedProcessStepOriginalState.position,
+              inWaitingArea: draggedProcessStepOriginalState.inWaitingArea,
+              assignedToPlayerId: draggedProcessStepOriginalState.assignedToPlayerId,
+            });
+          }
         }
       }
     }
