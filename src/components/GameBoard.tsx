@@ -90,6 +90,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [draggedPlayer, setDraggedPlayer] = React.useState<string | null>(null);
   const [draggedProcessStep, setDraggedProcessStep] = React.useState<string | null>(null);
   const [draggedProcessStepOriginalState, setDraggedProcessStepOriginalState] = React.useState<{inWaitingArea: boolean, position: any, assignedToPlayerId: any} | null>(null);
+  const [processStepTargetPlayer, setProcessStepTargetPlayer] = React.useState<string | null>(null); // Highlight target player for process step
   const gameBoardRef = React.useRef<HTMLDivElement>(null);
   
   // Placed communication objects on field
@@ -119,6 +120,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
   
   // Player detail view (for quick info card)
   const [selectedPlayerDetail, setSelectedPlayerDetail] = React.useState<string | null>(null);
+  
+  // Track if player was actually dragged (to prevent modal opening on drag)
+  const [wasPlayerDragged, setWasPlayerDragged] = React.useState(false);
   
   // Player inspection mode (for split screen)
   const [inspectedPlayer, setInspectedPlayer] = React.useState<string | null>(null);
@@ -189,8 +193,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
   // Management menu state
   const [showManagementMenu, setShowManagementMenu] = React.useState(false);
   const [companyName, setCompanyName] = React.useState('');
+  const [gameName, setGameName] = React.useState(''); // Neuer State für Spielnamen
   const [saveMessage, setSaveMessage] = React.useState('');
-  const [gameVersions, setGameVersions] = React.useState<Array<{ id: string, name: string, timestamp: any }>>([]);
+  const [gameVersions, setGameVersions] = React.useState<Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any }>>([]);
   const [showVersions, setShowVersions] = React.useState(false);
   
   // State for decision creation
@@ -329,16 +334,14 @@ const GameBoard: React.FC<GameBoardProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedConnectionDetail, inspectedPlayer, players, cards, onRemoveCard, onAddPlayer]);
 
-  // Subscribe to game versions
+  // Subscribe to ALL game versions (spielübergreifend)
   React.useEffect(() => {
-    if (!gameId) return;
-    
-    const unsubscribe = gameService.subscribeToGameVersions(gameId, (versions) => {
+    const unsubscribe = gameService.subscribeToAllGameVersions((versions) => {
       setGameVersions(versions);
     });
     
     return unsubscribe;
-  }, [gameId]);
+  }, []);
 
   // Global MouseMove/MouseUp for connection dragging
   // Move entire connection (both endpoints) smoothly
@@ -1109,7 +1112,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
         setContextMenuPlayer(playerId);
       }
     } else {
-      // Normaler Klick: Zeige Details
+      // Normaler Klick: Zeige Details nur wenn NICHT gedraggt wurde
+      if (wasPlayerDragged) {
+        console.log('🚫 Modal nicht öffnen - Spieler wurde gedraggt');
+        return;
+      }
+      
       if (selectedPlayerDetail === playerId) {
         setSelectedPlayerDetail(null);
       } else {
@@ -1126,6 +1134,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
     if (contextMenuPlayer) {
       setContextMenuPlayer(null);
     }
+    
+    // Reset drag tracking
+    setWasPlayerDragged(false);
     
     e.preventDefault();
     e.stopPropagation();
@@ -1544,6 +1555,25 @@ const GameBoard: React.FC<GameBoardProps> = ({
       const clampedX = Math.max(8, Math.min(92, x));
       const clampedY = Math.max(8, Math.min(92, y));
       
+      // Finde nahegelegene Spieler zum Highlighten
+      const playersOnBoard = players.filter(p => p.onBoard !== false);
+      let targetPlayer = null;
+      let minDistance = Infinity;
+
+      for (const player of playersOnBoard) {
+        const playerPos = getPlayerPosition(player, players.indexOf(player), players.length);
+        
+        const dx = playerPos.x - clampedX;
+        const dy = playerPos.y - clampedY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < 8 && distance < minDistance) {
+          minDistance = distance;
+          targetPlayer = player;
+        }
+      }
+      
+      setProcessStepTargetPlayer(targetPlayer?.id || null);
       setDragPreviewPosition({ x: clampedX, y: clampedY });
       return;
     }
@@ -1563,11 +1593,13 @@ const GameBoard: React.FC<GameBoardProps> = ({
     if (player.onBoard === true || (player.onBoard !== false && player.position)) {
       if (onUpdatePlayerPosition && draggedPlayer) {
         console.log('🔵🔵🔵 PLAYER MOVE:', player.name, 'to', { x: clampedX, y: clampedY });
+        setWasPlayerDragged(true); // Mark that player was dragged
         onUpdatePlayerPosition(draggedPlayer, { x: clampedX, y: clampedY });
       }
     }
     // Wenn der Spieler aus dem Wartebereich gezogen wird (onBoard === false), zeige nur eine Vorschau
     else if (player.onBoard === false) {
+      setWasPlayerDragged(true); // Mark that player was dragged
       setDragPreviewPosition({ x: clampedX, y: clampedY });
     }
   };
@@ -2064,6 +2096,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     setDraggedPlayer(null);
     setDraggedProcessStep(null);
     setDraggedProcessStepOriginalState(null);
+    setProcessStepTargetPlayer(null);
     setDragPreviewPosition(null);
     setDraggedConnectionEnd(null);
     setDraggedCommObject(null);
@@ -2860,6 +2893,17 @@ const GameBoard: React.FC<GameBoardProps> = ({
                           </div>
                         </div>
                         
+                        <div className="mb-4">
+                          <label className="block text-sm font-semibold text-gray-300 mb-3">Spielname (optional)</label>
+                          <input
+                            type="text"
+                            value={gameName}
+                            onChange={(e) => setGameName(e.target.value)}
+                            placeholder="z.B. Projektname, Kunde, Abteilung..."
+                            className="w-full px-5 py-4 bg-slate-700/50 text-white rounded-xl border-2 border-purple-400/30 focus:border-purple-400 focus:outline-none text-base placeholder-gray-500 transition-all shadow-lg"
+                          />
+                        </div>
+                        
                         <div className="mb-6">
                           <label className="block text-sm font-semibold text-gray-300 mb-3">Versionsname</label>
                           <input
@@ -2897,11 +2941,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
                                     players,
                                     cards,
                                     processObjects
-                                  });
+                                  }, gameName.trim() || undefined);
                                   setSaveMessage('Prozess erfolgreich gespeichert!');
                                   setTimeout(() => {
                                     setSaveMessage('');
                                     setCompanyName('');
+                                    setGameName('');
                                   }, 3000);
                                 } catch (error) {
                                   console.error('Fehler beim Speichern:', error);
@@ -2990,59 +3035,87 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             <p className="text-gray-500 text-sm mt-1">Erstelle deine erste Version im Speichern-Tab</p>
                           </div>
                         ) : (
-                          <div className="space-y-2">
-                            {gameVersions.map((version, index) => (
-                              <button
-                                key={version.id}
-                                onClick={async () => {
-                                  if (gameId && window.confirm(`Version "${version.name}" laden?\n\nDer aktuelle Spielstand wird überschrieben!`)) {
-                                    try {
-                                      await gameService.loadGameVersion(gameId, version.id);
-                                      setSaveMessage('Version geladen!');
-                                      setShowVersions(false);
-                                      setTimeout(() => {
-                                        setSaveMessage('');
-                                        setShowManagementMenu(false);
-                                      }, 1500);
-                                    } catch (error) {
-                                      console.error('Fehler beim Laden:', error);
-                                      alert('Fehler beim Laden der Version');
-                                    }
-                                  }
-                                }}
-                                className="w-full text-left p-4 bg-slate-700/50 hover:bg-slate-700 rounded-xl transition-all border border-white/10 hover:border-purple-400/30 group"
-                              >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-bold">
-                                        #{gameVersions.length - index}
-                                      </span>
-                                      <div className="font-semibold text-white text-base group-hover:text-purple-300 transition-colors">
-                                        {version.name}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-4 text-xs text-gray-400">
-                                      <div className="flex items-center gap-1">
-                                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                          <circle cx="12" cy="12" r="10" />
-                                          <polyline points="12 6 12 12 16 14" />
-                                        </svg>
-                                        {version.timestamp?.toDate ? new Date(version.timestamp.toDate()).toLocaleString('de-DE', {
-                                          day: '2-digit',
-                                          month: '2-digit',
-                                          year: 'numeric',
-                                          hour: '2-digit',
-                                          minute: '2-digit'
-                                        }) : 'Gerade eben'}
-                                      </div>
-                                    </div>
+                          <div className="space-y-4">
+                            {/* Gruppiere Versionen nach Spielname */}
+                            {Object.entries(
+                              gameVersions.reduce((acc, version) => {
+                                const key = version.gameName;
+                                if (!acc[key]) acc[key] = [];
+                                acc[key].push(version);
+                                return acc;
+                              }, {} as Record<string, typeof gameVersions>)
+                            ).map(([gameName, versions]) => (
+                              <div key={gameName} className="border border-purple-400/20 rounded-xl p-4 bg-slate-800/30">
+                                <div className="flex items-center gap-3 mb-3 pb-3 border-b border-white/10">
+                                  <div className="p-2 bg-purple-500/20 rounded-lg">
+                                    <svg className="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                    </svg>
                                   </div>
-                                  <svg className="w-5 h-5 text-gray-400 group-hover:text-purple-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M9 18l6-6-6-6" />
-                                  </svg>
+                                  <div>
+                                    <h4 className="text-white font-bold text-lg">{gameName}</h4>
+                                    <p className="text-gray-400 text-xs">{versions[0].gameId}</p>
+                                  </div>
+                                  <span className="ml-auto px-3 py-1 bg-purple-500/20 text-purple-300 rounded-lg text-sm font-bold">
+                                    {versions.length} {versions.length === 1 ? 'Version' : 'Versionen'}
+                                  </span>
                                 </div>
-                              </button>
+                                <div className="space-y-2">
+                                  {versions.map((version, index) => (
+                                    <button
+                                      key={version.id}
+                                      onClick={async () => {
+                                        if (gameId && window.confirm(`Version "${version.versionName}" von "${version.gameName}" laden?\n\nDer aktuelle Spielstand wird überschrieben!`)) {
+                                          try {
+                                            await gameService.loadGameVersion(gameId, version.id);
+                                            setSaveMessage('Version geladen!');
+                                            setShowVersions(false);
+                                            setTimeout(() => {
+                                              setSaveMessage('');
+                                              setShowManagementMenu(false);
+                                            }, 1500);
+                                          } catch (error) {
+                                            console.error('Fehler beim Laden:', error);
+                                            alert('Fehler beim Laden der Version');
+                                          }
+                                        }
+                                      }}
+                                      className="w-full text-left p-3 bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-all border border-white/10 hover:border-purple-400/30 group"
+                                    >
+                                      <div className="flex items-start justify-between">
+                                        <div className="flex-1">
+                                          <div className="flex items-center gap-2 mb-1">
+                                            <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded text-xs font-bold">
+                                              #{versions.length - index}
+                                            </span>
+                                            <div className="font-semibold text-white text-sm group-hover:text-purple-300 transition-colors">
+                                              {version.versionName}
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-4 text-xs text-gray-400">
+                                            <div className="flex items-center gap-1">
+                                              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <circle cx="12" cy="12" r="10" />
+                                                <polyline points="12 6 12 12 16 14" />
+                                              </svg>
+                                              {version.timestamp?.toDate ? new Date(version.timestamp.toDate()).toLocaleString('de-DE', {
+                                                day: '2-digit',
+                                                month: '2-digit',
+                                                year: 'numeric',
+                                                hour: '2-digit',
+                                                minute: '2-digit'
+                                              }) : 'Gerade eben'}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <svg className="w-5 h-5 text-gray-400 group-hover:text-purple-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M9 18l6-6-6-6" />
+                                        </svg>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
                             ))}
                           </div>
                         )}
@@ -3382,6 +3455,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
           <div 
             ref={gameBoardRef}
             className={`${inspectedPlayer || inspectedProcessStep || inspectedDecisionBox || selectedObjectDetail ? 'flex-[2]' : 'flex-1'} bg-gradient-to-br from-slate-700/40 via-indigo-800/30 to-slate-700/40 backdrop-blur-sm rounded-3xl shadow-2xl border-2 ${isConnectorMode ? 'border-purple-400/50' : 'border-indigo-400/30'} p-8 relative overflow-hidden transition-all duration-300`}
+            onClick={(e) => {
+              // Schließe Spieler-Details wenn auf freies Feld geklickt wird
+              if (e.target === e.currentTarget) {
+                setSelectedPlayerDetail(null);
+              }
+            }}
             onMouseDown={(e) => {
               if (gameBoardRef.current) {
                 const boardRect = gameBoardRef.current.getBoundingClientRect();
@@ -4136,7 +4215,10 @@ const GameBoard: React.FC<GameBoardProps> = ({
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={(e) => handleMouseUp(e)}
-            onClick={() => setContextMenuPlayer(null)}
+            onClick={() => {
+              setContextMenuPlayer(null);
+              setSelectedPlayerDetail(null);
+            }}
             onDragOver={(e) => {
               e.preventDefault();
             }}
@@ -4263,6 +4345,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
               const isConnectorStarter = isConnectorMode && connectorStarter === player.id;
               const isConnectorEmpfaenger = isConnectorMode && connectorEmpfaenger === player.id;
               
+              // Process step target highlighting
+              const isProcessStepTarget = processStepTargetPlayer === player.id;
+              
               return (
                 <div
                   key={player.id}
@@ -4304,7 +4389,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         className="w-24 h-24 rounded-full flex items-center justify-center text-4xl relative overflow-hidden"
                         style={{
                           backgroundColor: player.color,
-                          boxShadow: snapTargetPlayerId === player.id
+                          boxShadow: isProcessStepTarget
+                            ? `0 6px 16px rgba(0,0,0,0.3), 0 0 0 6px #14b8a6, 0 0 20px 8px rgba(20, 184, 166, 0.4), inset 0 -4px 8px rgba(0,0,0,0.15), inset 0 2px 8px rgba(255,255,255,0.2)`
+                            : snapTargetPlayerId === player.id
                             ? `0 6px 16px rgba(0,0,0,0.3), 0 0 0 6px #22c55e, 0 0 20px 8px rgba(34, 197, 94, 0.4), inset 0 -4px 8px rgba(0,0,0,0.15), inset 0 2px 8px rgba(255,255,255,0.2)`
                             : isConnectorStarter
                             ? `0 6px 16px rgba(0,0,0,0.3), 0 0 0 4px #a855f7, inset 0 -4px 8px rgba(0,0,0,0.15), inset 0 2px 8px rgba(255,255,255,0.2)`
@@ -4574,31 +4661,45 @@ const GameBoard: React.FC<GameBoardProps> = ({
                           {linkedSteps.map((obj) => {
                             const step = obj as ProcessStep;
                             const isDragging = draggedProcessStep === step.id;
+                            
+                            // Wenn dieser Prozessschritt gerade gedraggt wird, blende ihn hier aus (zeige nur Preview)
+                            if (isDragging) return null;
+                            
                             return (
                             <div
                               key={step.id}
-                              className={`group bg-gradient-to-br from-teal-500 to-teal-600 backdrop-blur rounded-xl p-3 shadow-xl border-2 border-teal-300/50 w-44 transition-all relative ${
-                                isDragging ? 'scale-105 shadow-2xl ring-4 ring-teal-400/50' : 'hover:shadow-2xl'
-                              }`}
+                              className={`group bg-gradient-to-br from-teal-500 to-teal-600 backdrop-blur rounded-xl p-3 shadow-xl border-2 border-teal-300/50 w-44 transition-all relative cursor-grab active:cursor-grabbing hover:shadow-2xl hover:scale-105`}
                               style={{ zIndex: 10 }}
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                // Speichere ursprünglichen Zustand
+                                setDraggedProcessStepOriginalState({
+                                  inWaitingArea: step.inWaitingArea || false,
+                                  position: step.position,
+                                  assignedToPlayerId: step.assignedToPlayerId
+                                });
+                                setDraggedProcessStep(step.id);
+                              }}
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
                                 console.log('📋 Process Step Details:', step);
                               }}
                             >
-                              {/* Drag Handle - Zentraler Punkt */}
+                              {/* Visueller Drag-Indikator oben rechts */}
+                              <div className="absolute top-2 right-2 flex items-center gap-1 text-white/70 group-hover:text-white transition-colors">
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                  <circle cx="9" cy="5" r="2"/>
+                                  <circle cx="9" cy="12" r="2"/>
+                                  <circle cx="9" cy="19" r="2"/>
+                                  <circle cx="15" cy="5" r="2"/>
+                                  <circle cx="15" cy="12" r="2"/>
+                                  <circle cx="15" cy="19" r="2"/>
+                                </svg>
+                              </div>
+                              
+                              {/* Drag Handle - Zentraler Punkt (für zusätzliche visuelle Feedback) */}
                               <div
-                                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 cursor-grab active:cursor-grabbing z-10"
-                                onMouseDown={(e) => {
-                                  e.stopPropagation();
-                                  // Speichere ursprünglichen Zustand
-                                  setDraggedProcessStepOriginalState({
-                                    inWaitingArea: step.inWaitingArea || false,
-                                    position: step.position,
-                                    assignedToPlayerId: step.assignedToPlayerId
-                                  });
-                                  setDraggedProcessStep(step.id);
-                                }}
+                                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 z-10 pointer-events-none"
                               >
                                 {/* Äußerer Ring */}
                                 <div className="absolute inset-0 rounded-full bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>

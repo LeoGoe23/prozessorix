@@ -457,7 +457,7 @@ export const subscribeToDecisionLines = (
 };
 
 // Save game version
-export const saveGameVersion = async (gameId: string, versionName: string, data: { players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }) => {
+export const saveGameVersion = async (gameId: string, versionName: string, data: { players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }, gameName?: string) => {
   // Remove undefined values from the data
   const cleanData = (obj: any): any => {
     if (Array.isArray(obj)) {
@@ -475,9 +475,12 @@ export const saveGameVersion = async (gameId: string, versionName: string, data:
     return obj;
   };
 
-  const versionRef = doc(collection(db, 'games', gameId, 'versions'));
+  // Speichere zentral unter /versions statt /games/{gameId}/versions
+  const versionRef = doc(collection(db, 'versions'));
   await setDoc(versionRef, {
-    name: versionName,
+    gameId: gameId,
+    gameName: gameName || gameId,
+    versionName: versionName,
     players: cleanData(data.players),
     cards: cleanData(data.cards),
     processObjects: cleanData(data.processObjects),
@@ -486,15 +489,17 @@ export const saveGameVersion = async (gameId: string, versionName: string, data:
   return versionRef.id;
 };
 
-// Load game versions
-export const subscribeToGameVersions = (gameId: string, callback: (versions: Array<{ id: string, name: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }>) => void) => {
-  const versionsRef = collection(db, 'games', gameId, 'versions');
+// Load ALL game versions (spielübergreifend)
+export const subscribeToAllGameVersions = (callback: (versions: Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }>) => void) => {
+  const versionsRef = collection(db, 'versions');
   const q = query(versionsRef, orderBy('timestamp', 'desc'));
   
   return onSnapshot(q, (snapshot) => {
     const versions = snapshot.docs.map(doc => ({
       id: doc.id,
-      name: doc.data().name,
+      gameId: doc.data().gameId,
+      gameName: doc.data().gameName || doc.data().gameId,
+      versionName: doc.data().versionName,
       timestamp: doc.data().timestamp,
       players: doc.data().players || [],
       cards: doc.data().cards || [],
@@ -504,9 +509,31 @@ export const subscribeToGameVersions = (gameId: string, callback: (versions: Arr
   });
 };
 
+// Load game versions for a specific game
+export const subscribeToGameVersions = (gameId: string, callback: (versions: Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }>) => void) => {
+  const versionsRef = collection(db, 'versions');
+  const q = query(versionsRef, orderBy('timestamp', 'desc'));
+  
+  return onSnapshot(q, (snapshot) => {
+    const allVersions = snapshot.docs.map(doc => ({
+      id: doc.id,
+      gameId: doc.data().gameId,
+      gameName: doc.data().gameName || doc.data().gameId,
+      versionName: doc.data().versionName,
+      timestamp: doc.data().timestamp,
+      players: doc.data().players || [],
+      cards: doc.data().cards || [],
+      processObjects: doc.data().processObjects || [],
+    }));
+    // Filtere nur Versionen für dieses Spiel
+    const filteredVersions = allVersions.filter(v => v.gameId === gameId);
+    callback(filteredVersions);
+  });
+};
+
 // Load a specific version
 export const loadGameVersion = async (gameId: string, versionId: string) => {
-  const versionRef = doc(db, 'games', gameId, 'versions', versionId);
+  const versionRef = doc(db, 'versions', versionId);
   const versionSnap = await getDoc(versionRef);
   
   if (!versionSnap.exists()) {
