@@ -139,6 +139,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
   // Quick info card for connections (similar to player cards)
   const [selectedConnectionDetail, setSelectedConnectionDetail] = React.useState<{ from: string; to?: string; x: number; y: number } | null>(null);
   
+  // Selected free line modal
+  const [selectedFreeLine, setSelectedFreeLine] = React.useState<string | null>(null);
+  
   // Drag preview position for waiting area players
   const [dragPreviewPosition, setDragPreviewPosition] = React.useState<{ x: number; y: number } | null>(null);
   
@@ -5050,11 +5053,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
                 <React.Fragment key={line.id}>
                   {/* SVG Line */}
                   <svg
-                    className="absolute inset-0 pointer-events-none"
+                    className="absolute inset-0"
                     style={{
                       zIndex: isDragging ? 30 : 18,
                       width: '100%',
-                      height: '100%'
+                      height: '100%',
+                      pointerEvents: 'none'
                     }}
                   >
                     <line
@@ -5070,6 +5074,31 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         undefined
                       }
                       opacity={isDragging ? 1 : 0.8}
+                      style={{ 
+                        pointerEvents: 'stroke',
+                        cursor: 'pointer',
+                        strokeWidth: (line.thickness || 2) + 10, // Larger hit area
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedFreeLine(line.id);
+                      }}
+                    />
+                    {/* Visible line on top */}
+                    <line
+                      x1={`${startX}%`}
+                      y1={`${startY}%`}
+                      x2={`${endX}%`}
+                      y2={`${endY}%`}
+                      stroke={line.color}
+                      strokeWidth={line.thickness || 2}
+                      strokeDasharray={
+                        line.style === 'dashed' ? '10,5' :
+                        line.style === 'dotted' ? '2,3' : 
+                        undefined
+                      }
+                      opacity={isDragging ? 1 : 0.8}
+                      style={{ pointerEvents: 'none' }}
                     />
                   </svg>
                   
@@ -8111,6 +8140,129 @@ const GameBoard: React.FC<GameBoardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Free Line Detail Modal */}
+      {selectedFreeLine && (() => {
+        const line = freeLines.find(l => l.id === selectedFreeLine);
+        if (!line) return null;
+        
+        const startPlayer = line.startPlayerId ? players.find(p => p.id === line.startPlayerId) : null;
+        const endPlayer = line.endPlayerId ? players.find(p => p.id === line.endPlayerId) : null;
+        
+        return (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-4"
+            onClick={() => setSelectedFreeLine(null)}
+          >
+            <div
+              className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl border border-white/20 shadow-2xl max-w-md w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-xl">
+                    <svg className="w-6 h-6 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="19" cy="12" r="2" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">Verbindungslinie</h3>
+                    <p className="text-sm text-gray-400">Details & Optionen</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedFreeLine(null)}
+                  className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <svg className="w-5 h-5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Line Preview */}
+              <div className="mb-6 p-4 bg-slate-700/30 rounded-xl border border-white/10">
+                <div className="flex items-center justify-center gap-2">
+                  <div 
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: line.color }}
+                  />
+                  <div
+                    className="flex-1 h-0.5"
+                    style={{
+                      backgroundColor: line.color,
+                      borderStyle: line.style === 'dashed' ? 'dashed' : line.style === 'dotted' ? 'dotted' : 'solid',
+                      borderWidth: line.style !== 'solid' ? '1px' : '0',
+                      borderColor: line.color,
+                      height: line.style === 'solid' ? `${line.thickness}px` : '0'
+                    }}
+                  />
+                  <div 
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: line.color }}
+                  />
+                </div>
+              </div>
+
+              {/* Connection Info */}
+              <div className="space-y-3 mb-6">
+                <div className="p-3 bg-slate-700/30 rounded-lg">
+                  <div className="text-xs text-gray-400 mb-1">Von</div>
+                  <div className="text-white font-semibold">
+                    {startPlayer ? `${startPlayer.icon} ${startPlayer.name}` : '🔵 Freie Position'}
+                  </div>
+                </div>
+                <div className="p-3 bg-slate-700/30 rounded-lg">
+                  <div className="text-xs text-gray-400 mb-1">Zu</div>
+                  <div className="text-white font-semibold">
+                    {endPlayer ? `${endPlayer.icon} ${endPlayer.name}` : '🔵 Freie Position'}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-slate-700/30 rounded-lg">
+                    <div className="text-xs text-gray-400 mb-1">Stil</div>
+                    <div className="text-white font-semibold capitalize">{line.style}</div>
+                  </div>
+                  <div className="p-3 bg-slate-700/30 rounded-lg">
+                    <div className="text-xs text-gray-400 mb-1">Dicke</div>
+                    <div className="text-white font-semibold">{line.thickness}px</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSelectedFreeLine(null)}
+                  className="flex-1 px-4 py-3 bg-slate-700/50 hover:bg-slate-700 text-white rounded-xl transition-all font-semibold"
+                >
+                  Schließen
+                </button>
+                <button
+                  onClick={async () => {
+                    if (window.confirm('Möchtest du diese Verbindungslinie wirklich löschen?')) {
+                      try {
+                        console.log('🗑️ Lösche Linie:', line.id);
+                        await onRemoveFreeLine(line.id);
+                        console.log('✅ Linie gelöscht');
+                        setSelectedFreeLine(null);
+                      } catch (error) {
+                        console.error('❌ Fehler beim Löschen der Linie:', error);
+                      }
+                    }
+                  }}
+                  className="flex-1 px-4 py-3 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-xl transition-all font-semibold border border-red-500/30 hover:border-red-500/50"
+                >
+                  🗑️ Löschen
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
