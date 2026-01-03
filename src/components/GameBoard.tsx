@@ -56,6 +56,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   onUpdateProcessObject,
   onAddFreeLine,
   onUpdateFreeLine,
+  onRemoveFreeLine,
   onAddDecisionLine,
   onUpdateDecisionLine,
   onRemoveDecisionLine,
@@ -142,6 +143,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
   // Selected free line modal
   const [selectedFreeLine, setSelectedFreeLine] = React.useState<string | null>(null);
   
+  // Selected decision line modal
+  const [selectedDecisionLine, setSelectedDecisionLine] = React.useState<string | null>(null);
+  
   // Drag preview position for waiting area players
   const [dragPreviewPosition, setDragPreviewPosition] = React.useState<{ x: number; y: number } | null>(null);
   
@@ -198,7 +202,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   const [companyName, setCompanyName] = React.useState('');
   const [gameName, setGameName] = React.useState(''); // Neuer State für Spielnamen
   const [saveMessage, setSaveMessage] = React.useState('');
-  const [gameVersions, setGameVersions] = React.useState<Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any }>>([]);
+  const [gameVersions, setGameVersions] = React.useState<Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any, players?: Player[], cards?: ProcessCard[], processObjects?: ProcessObject[], freeLines?: FreeLine[], decisionLines?: DecisionLine[] }>>([]);
   const [showVersions, setShowVersions] = React.useState(false);
   
   // State for decision creation
@@ -310,6 +314,24 @@ const GameBoard: React.FC<GameBoardProps> = ({
         }
       }
       
+      // Delete/Backspace: Lösche ausgewählte freie Linie
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFreeLine) {
+        e.preventDefault();
+        
+        console.log('🗑️ Lösche freie Linie:', selectedFreeLine);
+        onRemoveFreeLine(selectedFreeLine);
+        setSelectedFreeLine(null);
+      }
+      
+      // Delete/Backspace: Lösche ausgewählte Entscheidungslinie
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDecisionLine) {
+        e.preventDefault();
+        
+        console.log('🗑️ Lösche Entscheidungslinie:', selectedDecisionLine);
+        onRemoveDecisionLine(selectedDecisionLine);
+        setSelectedDecisionLine(null);
+      }
+      
       // Strg+C: Kopiere ausgewählten Spieler
       if (e.ctrlKey && e.key === 'c' && inspectedPlayer) {
         e.preventDefault();
@@ -335,7 +357,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedConnectionDetail, inspectedPlayer, players, cards, onRemoveCard, onAddPlayer]);
+  }, [selectedConnectionDetail, selectedFreeLine, selectedDecisionLine, inspectedPlayer, players, cards, onRemoveCard, onRemoveFreeLine, onRemoveDecisionLine, onAddPlayer]);
 
   // Subscribe to ALL game versions (spielübergreifend)
   React.useEffect(() => {
@@ -1592,6 +1614,77 @@ const GameBoard: React.FC<GameBoardProps> = ({
     const clampedX = Math.max(8, Math.min(92, x));
     const clampedY = Math.max(8, Math.min(92, y));
     
+    // Prüfe ob Spieler nahe an offenen Enden von freien Linien ist
+    let snapToFreeLine = null;
+    for (const line of freeLines) {
+      // Startpunkt prüfen (wenn nicht angedockt)
+      if (!line.startPlayerId) {
+        const dx = clampedX - line.startPosition.x;
+        const dy = clampedY - line.startPosition.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < 8) { // 8% Radius
+          snapToFreeLine = { lineId: line.id, endpoint: 'start', position: line.startPosition };
+          break;
+        }
+      }
+      // Endpunkt prüfen (wenn nicht angedockt)
+      if (!line.endPlayerId) {
+        const dx = clampedX - line.endPosition.x;
+        const dy = clampedY - line.endPosition.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < 8) { // 8% Radius
+          snapToFreeLine = { lineId: line.id, endpoint: 'end', position: line.endPosition };
+          break;
+        }
+      }
+    }
+    
+    // Prüfe ob Spieler nahe an offenen Enden von Entscheidungslinien ist
+    let snapToDecisionLine = null;
+    if (!snapToFreeLine) { // Nur wenn nicht bereits bei freier Linie
+      for (const line of decisionLines) {
+        // Startpunkt prüfen (wenn nicht angedockt)
+        if (!line.startPlayerId) {
+          const dx = clampedX - line.startPosition.x;
+          const dy = clampedY - line.startPosition.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < 8) { // 8% Radius
+            snapToDecisionLine = { lineId: line.id, endpoint: 'start', position: line.startPosition };
+            break;
+          }
+        }
+        // Option1 Endpunkt prüfen (wenn nicht angedockt)
+        if (!line.option1PlayerId) {
+          const dx = clampedX - line.option1Position.x;
+          const dy = clampedY - line.option1Position.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < 8) { // 8% Radius
+            snapToDecisionLine = { lineId: line.id, endpoint: 'option1', position: line.option1Position };
+            break;
+          }
+        }
+        // Option2 Endpunkt prüfen (wenn nicht angedockt)
+        if (!line.option2PlayerId) {
+          const dx = clampedX - line.option2Position.x;
+          const dy = clampedY - line.option2Position.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < 8) { // 8% Radius
+            snapToDecisionLine = { lineId: line.id, endpoint: 'option2', position: line.option2Position };
+            break;
+          }
+        }
+      }
+    }
+    
+    // Setze Snap-Target für visuelle Hervorhebung
+    if (snapToFreeLine) {
+      setSnapTargetPlayerId(snapToFreeLine.lineId + '-' + snapToFreeLine.endpoint); // Verwende lineId als Marker
+    } else if (snapToDecisionLine) {
+      setSnapTargetPlayerId('decision-' + snapToDecisionLine.lineId + '-' + snapToDecisionLine.endpoint);
+    } else {
+      setSnapTargetPlayerId(null);
+    }
+    
     // Wenn der Spieler bereits auf dem Board ist (hat eine Position oder onBoard === true), aktualisiere die Position
     if (player.onBoard === true || (player.onBoard !== false && player.position)) {
       if (onUpdatePlayerPosition && draggedPlayer) {
@@ -1974,7 +2067,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               const dx = dropX - startX;
               const dy = dropY - startY;
               const distance = Math.sqrt(dx * dx + dy * dy);
-              if (distance < 8) {
+              if (distance < 12) { // Größerer Snap-Radius: 12% statt 8%
                 // Andocken am Startpunkt
                 if (onUpdateFreeLine) {
                   onUpdateFreeLine(line.id, {
@@ -1986,6 +2079,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   onUpdatePlayerPosition(currentDraggedPlayer, { x: startX, y: startY });
                 }
                 connectedToFreeLine = true;
+                console.log(`🔗 Spieler ${player.name} an Startpunkt von Linie ${line.id} angedockt`);
                 break;
               }
             }
@@ -1996,7 +2090,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
               const dx = dropX - endX;
               const dy = dropY - endY;
               const distance = Math.sqrt(dx * dx + dy * dy);
-              if (distance < 8) {
+              if (distance < 12) { // Größerer Snap-Radius: 12% statt 8%
                 // Andocken am Endpunkt
                 if (onUpdateFreeLine) {
                   onUpdateFreeLine(line.id, {
@@ -2008,13 +2102,90 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   onUpdatePlayerPosition(currentDraggedPlayer, { x: endX, y: endY });
                 }
                 connectedToFreeLine = true;
+                console.log(`🔗 Spieler ${player.name} an Endpunkt von Linie ${line.id} angedockt`);
                 break;
               }
             }
           }
 
-          // 2. Prüfe ob Spieler auf eine offene Verbindung gezogen wird (wie bisher)
+          // 2. Prüfe ob Spieler auf ein offenes Ende einer Entscheidungslinie gezogen wird
+          let connectedToDecisionLine = false;
           if (!connectedToFreeLine) {
+            for (const line of decisionLines) {
+              // Startpunkt prüfen
+              if (!line.startPlayerId) {
+                const startX = line.startPosition.x;
+                const startY = line.startPosition.y;
+                const dx = dropX - startX;
+                const dy = dropY - startY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < 12) { // Größerer Snap-Radius: 12% statt 8%
+                  // Andocken am Startpunkt
+                  if (onUpdateDecisionLine) {
+                    onUpdateDecisionLine(line.id, {
+                      startPlayerId: player.id,
+                      startPosition: { x: player.position?.x ?? dropX, y: player.position?.y ?? dropY }
+                    });
+                  }
+                  if (onUpdatePlayerPosition) {
+                    onUpdatePlayerPosition(currentDraggedPlayer, { x: startX, y: startY });
+                  }
+                  connectedToDecisionLine = true;
+                  console.log(`🔗 Spieler ${player.name} an Startpunkt von Entscheidung ${line.id} angedockt`);
+                  break;
+                }
+              }
+              // Option1 Endpunkt prüfen
+              if (!line.option1PlayerId) {
+                const option1X = line.option1Position.x;
+                const option1Y = line.option1Position.y;
+                const dx = dropX - option1X;
+                const dy = dropY - option1Y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < 12) { // Größerer Snap-Radius: 12% statt 8%
+                  // Andocken an Option1
+                  if (onUpdateDecisionLine) {
+                    onUpdateDecisionLine(line.id, {
+                      option1PlayerId: player.id,
+                      option1Position: { x: player.position?.x ?? dropX, y: player.position?.y ?? dropY }
+                    });
+                  }
+                  if (onUpdatePlayerPosition) {
+                    onUpdatePlayerPosition(currentDraggedPlayer, { x: option1X, y: option1Y });
+                  }
+                  connectedToDecisionLine = true;
+                  console.log(`🔗 Spieler ${player.name} an Option1 von Entscheidung ${line.id} angedockt`);
+                  break;
+                }
+              }
+              // Option2 Endpunkt prüfen
+              if (!line.option2PlayerId) {
+                const option2X = line.option2Position.x;
+                const option2Y = line.option2Position.y;
+                const dx = dropX - option2X;
+                const dy = dropY - option2Y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < 12) { // Größerer Snap-Radius: 12% statt 8%
+                  // Andocken an Option2
+                  if (onUpdateDecisionLine) {
+                    onUpdateDecisionLine(line.id, {
+                      option2PlayerId: player.id,
+                      option2Position: { x: player.position?.x ?? dropX, y: player.position?.y ?? dropY }
+                    });
+                  }
+                  if (onUpdatePlayerPosition) {
+                    onUpdatePlayerPosition(currentDraggedPlayer, { x: option2X, y: option2Y });
+                  }
+                  connectedToDecisionLine = true;
+                  console.log(`🔗 Spieler ${player.name} an Option2 von Entscheidung ${line.id} angedockt`);
+                  break;
+                }
+              }
+            }
+          }
+
+          // 3. Prüfe ob Spieler auf eine offene Verbindung gezogen wird (wie bisher)
+          if (!connectedToFreeLine && !connectedToDecisionLine) {
             // Placeholder für zukünftige Connection-Logik
             // Wenn nicht an offenes Ende gedockt: normal platzieren
             if (player.onBoard === false && onUpdatePlayerPosition) {
@@ -2105,6 +2276,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
     setDraggedCommObject(null);
     setDraggedConnection(null);
     setConnectionDragOffset({ x: 0, y: 0 });
+    setSnapTargetPlayerId(null); // Reset Snap-Target für freie Linien
   };
 
   const getPlayerPosition = (player: Player, index: number, total: number) => {
@@ -2943,7 +3115,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
                                   await gameService.saveGameVersion(gameId, companyName.trim(), {
                                     players,
                                     cards,
-                                    processObjects
+                                    processObjects,
+                                    freeLines,
+                                    decisionLines
                                   }, gameName.trim() || undefined);
                                   setSaveMessage('Prozess erfolgreich gespeichert!');
                                   setTimeout(() => {
@@ -5027,6 +5201,11 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             const isDraggingEnd = draggedPlayer === `freeline-end-${line.id}`;
                             const isDraggingMiddle = draggedPlayer === `freeline-middle-${line.id}`;
                             const isDragging = isDraggingStart || isDraggingEnd || isDraggingMiddle;
+                            const isSelected = selectedFreeLine === line.id;
+                            
+                            // Prüfe ob ein Spieler über einem offenen Ende dieser Linie ist
+                            const isStartHighlighted = !line.startPlayerId && snapTargetPlayerId === `${line.id}-start`;
+                            const isEndHighlighted = !line.endPlayerId && snapTargetPlayerId === `${line.id}-end`;
                             
                             // Startposition: Wenn angedockt, folge IMMER dem Spieler (außer wenn diese Linie selbst gedraggt wird)
                             const startPlayer = line.startPlayerId ? players.find(p => p.id === line.startPlayerId) : null;
@@ -5100,6 +5279,19 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       opacity={isDragging ? 1 : 0.8}
                       style={{ pointerEvents: 'none' }}
                     />
+                    {/* Selection indicator */}
+                    {isSelected && (
+                      <line
+                        x1={`${startX}%`}
+                        y1={`${startY}%`}
+                        x2={`${endX}%`}
+                        y2={`${endY}%`}
+                        stroke="#3b82f6"
+                        strokeWidth={(line.thickness || 2) + 4}
+                        opacity={0.3}
+                        style={{ pointerEvents: 'none' }}
+                      />
+                    )}
                   </svg>
                   
                   {/* Angedockt Indikator am Start */}
@@ -5238,14 +5430,14 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   >
                     <div
                       className={`rounded-full transition-all ${
-                        isDraggingStart ? 'scale-125' : 'hover:scale-110'
+                        isDraggingStart || isStartHighlighted ? 'scale-125' : 'hover:scale-110'
                       }`}
                       style={{
-                        width: isDraggingStart ? '20px' : '16px',
-                        height: isDraggingStart ? '20px' : '16px',
+                        width: (isDraggingStart || isStartHighlighted) ? '20px' : '16px',
+                        height: (isDraggingStart || isStartHighlighted) ? '20px' : '16px',
                         backgroundColor: line.color,
                         border: '2px solid white',
-                        boxShadow: isDraggingStart 
+                        boxShadow: (isDraggingStart || isStartHighlighted)
                           ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30` 
                           : '0 2px 8px rgba(0,0,0,0.3)',
                       }}
@@ -5280,14 +5472,14 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   >
                     <div
                       className={`rounded-full transition-all ${
-                        isDraggingEnd ? 'scale-125' : 'hover:scale-110'
+                        isDraggingEnd || isEndHighlighted ? 'scale-125' : 'hover:scale-110'
                       }`}
                       style={{
-                        width: isDraggingEnd ? '20px' : '16px',
-                        height: isDraggingEnd ? '20px' : '16px',
+                        width: (isDraggingEnd || isEndHighlighted) ? '20px' : '16px',
+                        height: (isDraggingEnd || isEndHighlighted) ? '20px' : '16px',
                         backgroundColor: line.color,
                         border: '2px solid white',
-                        boxShadow: isDraggingEnd 
+                        boxShadow: (isDraggingEnd || isEndHighlighted)
                           ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30` 
                           : '0 2px 8px rgba(0,0,0,0.3)',
                       }}
@@ -5303,6 +5495,12 @@ const GameBoard: React.FC<GameBoardProps> = ({
               const isDraggingStart = draggedPlayer === `decisionline-start-${line.id}`;
               const isDraggingOption1 = draggedPlayer === `decisionline-option1-${line.id}`;
               const isDraggingOption2 = draggedPlayer === `decisionline-option2-${line.id}`;
+              const isSelected = selectedDecisionLine === line.id;
+              
+              // Prüfe ob ein Spieler über einem offenen Ende dieser Entscheidungslinie ist
+              const isStartHighlighted = !line.startPlayerId && snapTargetPlayerId === `decision-${line.id}-start`;
+              const isOption1Highlighted = !line.option1PlayerId && snapTargetPlayerId === `decision-${line.id}-option1`;
+              const isOption2Highlighted = !line.option2PlayerId && snapTargetPlayerId === `decision-${line.id}-option2`;
               
               // Spieler finden
               const startPlayer = line.startPlayerId ? players.find(p => p.id === line.startPlayerId) : null;
@@ -5363,6 +5561,38 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       strokeWidth="3"
                       opacity="0.8"
                     />
+                    {/* Selection indicators */}
+                    {isSelected && (
+                      <>
+                        <line
+                          x1={`${startX}%`}
+                          y1={`${startY}%`}
+                          x2={`${boxX}%`}
+                          y2={`${boxY}%`}
+                          stroke="#3b82f6"
+                          strokeWidth="7"
+                          opacity="0.3"
+                        />
+                        <line
+                          x1={`${boxX}%`}
+                          y1={`${boxY}%`}
+                          x2={`${option1X}%`}
+                          y2={`${option1Y}%`}
+                          stroke="#3b82f6"
+                          strokeWidth="7"
+                          opacity="0.3"
+                        />
+                        <line
+                          x1={`${boxX}%`}
+                          y1={`${boxY}%`}
+                          x2={`${option2X}%`}
+                          y2={`${option2Y}%`}
+                          stroke="#3b82f6"
+                          strokeWidth="7"
+                          opacity="0.3"
+                        />
+                      </>
+                    )}
                   </svg>
                   
                   {/* Minimalist Decision Box in der Mitte */}
@@ -5380,6 +5610,10 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       e.stopPropagation();
                       e.preventDefault();
                       setDraggedPlayer(`decisionline-box-${line.id}`);
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedDecisionLine(line.id);
                     }}
                     title={line.question || 'Entscheidung'}
                   >
@@ -5510,15 +5744,15 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     >
                       <div
                         className={`rounded-full transition-all ${
-                          isDraggingStart ? 'scale-125' : 'hover:scale-110'
+                          isDraggingStart || isStartHighlighted ? 'scale-125' : 'hover:scale-110'
                         }`}
                         style={{
-                          width: isDraggingStart ? '20px' : '16px',
-                          height: isDraggingStart ? '20px' : '16px',
+                          width: (isDraggingStart || isStartHighlighted) ? '20px' : '16px',
+                          height: (isDraggingStart || isStartHighlighted) ? '20px' : '16px',
                           backgroundColor: line.color,
                           border: '2px solid white',
-                          boxShadow: isDraggingStart 
-                            ? `0 0 20px ${line.color}80`
+                          boxShadow: (isDraggingStart || isStartHighlighted)
+                            ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30`
                             : '0 2px 8px rgba(0,0,0,0.3)',
                         }}
                       />
@@ -5544,15 +5778,15 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     >
                       <div
                         className={`rounded-full transition-all ${
-                          isDraggingOption1 ? 'scale-125' : 'hover:scale-110'
+                          isDraggingOption1 || isOption1Highlighted ? 'scale-125' : 'hover:scale-110'
                         }`}
                         style={{
-                          width: isDraggingOption1 ? '20px' : '16px',
-                          height: isDraggingOption1 ? '20px' : '16px',
+                          width: (isDraggingOption1 || isOption1Highlighted) ? '20px' : '16px',
+                          height: (isDraggingOption1 || isOption1Highlighted) ? '20px' : '16px',
                           backgroundColor: line.color,
                           border: '2px solid white',
-                          boxShadow: isDraggingOption1 
-                            ? `0 0 20px ${line.color}80`
+                          boxShadow: (isDraggingOption1 || isOption1Highlighted)
+                            ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30`
                             : '0 2px 8px rgba(0,0,0,0.3)',
                         }}
                       />
@@ -5578,15 +5812,15 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     >
                       <div
                         className={`rounded-full transition-all ${
-                          isDraggingOption2 ? 'scale-125' : 'hover:scale-110'
+                          isDraggingOption2 || isOption2Highlighted ? 'scale-125' : 'hover:scale-110'
                         }`}
                         style={{
-                          width: isDraggingOption2 ? '20px' : '16px',
-                          height: isDraggingOption2 ? '20px' : '16px',
+                          width: (isDraggingOption2 || isOption2Highlighted) ? '20px' : '16px',
+                          height: (isDraggingOption2 || isOption2Highlighted) ? '20px' : '16px',
                           backgroundColor: line.color,
                           border: '2px solid white',
-                          boxShadow: isDraggingOption2 
-                            ? `0 0 20px ${line.color}80`
+                          boxShadow: (isDraggingOption2 || isOption2Highlighted)
+                            ? `0 0 20px ${line.color}80, 0 0 0 4px ${line.color}30`
                             : '0 2px 8px rgba(0,0,0,0.3)',
                         }}
                       />
@@ -8251,6 +8485,112 @@ const GameBoard: React.FC<GameBoardProps> = ({
                         setSelectedFreeLine(null);
                       } catch (error) {
                         console.error('❌ Fehler beim Löschen der Linie:', error);
+                      }
+                    }
+                  }}
+                  className="flex-1 px-4 py-3 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-xl transition-all font-semibold border border-red-500/30 hover:border-red-500/50"
+                >
+                  🗑️ Löschen
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      
+      {/* Decision Line Detail Modal */}
+      {(() => {
+        const line = decisionLines.find(l => l.id === selectedDecisionLine);
+        if (!line) return null;
+        
+        const startPlayer = line.startPlayerId ? players.find(p => p.id === line.startPlayerId) : null;
+        const option1Player = line.option1PlayerId ? players.find(p => p.id === line.option1PlayerId) : null;
+        const option2Player = line.option2PlayerId ? players.find(p => p.id === line.option2PlayerId) : null;
+        
+        return (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+            onClick={() => setSelectedDecisionLine(null)}
+          >
+            <div 
+              className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-2xl p-6 max-w-md w-full border border-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div 
+                    className="w-12 h-12 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: line.color }}
+                  >
+                    <span className="text-2xl">?</span>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">Entscheidung</h3>
+                    <p className="text-sm text-gray-400">Details & Optionen</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedDecisionLine(null)}
+                  className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <svg className="w-5 h-5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Question */}
+              {line.question && (
+                <div className="mb-6 p-4 bg-slate-700/30 rounded-xl border border-white/10">
+                  <div className="text-xs text-gray-400 mb-1">Frage</div>
+                  <div className="text-white font-semibold">{line.question}</div>
+                </div>
+              )}
+
+              {/* Connection Info */}
+              <div className="space-y-3 mb-6">
+                <div className="p-3 bg-slate-700/30 rounded-lg">
+                  <div className="text-xs text-gray-400 mb-1">Von</div>
+                  <div className="text-white font-semibold">
+                    {startPlayer ? `${startPlayer.icon} ${startPlayer.name}` : '🔵 Freie Position'}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-slate-700/30 rounded-lg">
+                    <div className="text-xs text-gray-400 mb-1">{line.option1Label || 'Option 1'}</div>
+                    <div className="text-white font-semibold text-sm">
+                      {option1Player ? `${option1Player.icon} ${option1Player.name}` : '🔵 Freie Position'}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-slate-700/30 rounded-lg">
+                    <div className="text-xs text-gray-400 mb-1">{line.option2Label || 'Option 2'}</div>
+                    <div className="text-white font-semibold text-sm">
+                      {option2Player ? `${option2Player.icon} ${option2Player.name}` : '🔵 Freie Position'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSelectedDecisionLine(null)}
+                  className="flex-1 px-4 py-3 bg-slate-700/50 hover:bg-slate-700 text-white rounded-xl transition-all font-semibold"
+                >
+                  Schließen
+                </button>
+                <button
+                  onClick={async () => {
+                    if (window.confirm('Möchtest du diese Entscheidung wirklich löschen?')) {
+                      try {
+                        console.log('🗑️ Lösche Entscheidung:', line.id);
+                        await onRemoveDecisionLine(line.id);
+                        console.log('✅ Entscheidung gelöscht');
+                        setSelectedDecisionLine(null);
+                      } catch (error) {
+                        console.error('❌ Fehler beim Löschen der Entscheidung:', error);
                       }
                     }
                   }}

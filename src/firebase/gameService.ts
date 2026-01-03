@@ -10,7 +10,8 @@ import {
   serverTimestamp,
   query,
   orderBy,
-  getDoc
+  getDoc,
+  getDocs
 } from 'firebase/firestore';
 import { db } from './config';
 import { Player, ProcessCard, ProcessObject, FreeLine, DecisionLine } from '../types/game';
@@ -457,7 +458,7 @@ export const subscribeToDecisionLines = (
 };
 
 // Save game version
-export const saveGameVersion = async (gameId: string, versionName: string, data: { players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }, gameName?: string) => {
+export const saveGameVersion = async (gameId: string, versionName: string, data: { players: Player[], cards: ProcessCard[], processObjects: ProcessObject[], freeLines?: FreeLine[], decisionLines?: DecisionLine[] }, gameName?: string) => {
   // Remove undefined values from the data
   const cleanData = (obj: any): any => {
     if (Array.isArray(obj)) {
@@ -484,13 +485,15 @@ export const saveGameVersion = async (gameId: string, versionName: string, data:
     players: cleanData(data.players),
     cards: cleanData(data.cards),
     processObjects: cleanData(data.processObjects),
+    freeLines: cleanData(data.freeLines || []),
+    decisionLines: cleanData(data.decisionLines || []),
     timestamp: serverTimestamp(),
   });
   return versionRef.id;
 };
 
 // Load ALL game versions (spielübergreifend)
-export const subscribeToAllGameVersions = (callback: (versions: Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }>) => void) => {
+export const subscribeToAllGameVersions = (callback: (versions: Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[], freeLines: FreeLine[], decisionLines: DecisionLine[] }>) => void) => {
   const versionsRef = collection(db, 'versions');
   const q = query(versionsRef, orderBy('timestamp', 'desc'));
   
@@ -504,13 +507,15 @@ export const subscribeToAllGameVersions = (callback: (versions: Array<{ id: stri
       players: doc.data().players || [],
       cards: doc.data().cards || [],
       processObjects: doc.data().processObjects || [],
+      freeLines: doc.data().freeLines || [],
+      decisionLines: doc.data().decisionLines || [],
     }));
     callback(versions);
   });
 };
 
 // Load game versions for a specific game
-export const subscribeToGameVersions = (gameId: string, callback: (versions: Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[] }>) => void) => {
+export const subscribeToGameVersions = (gameId: string, callback: (versions: Array<{ id: string, gameId: string, gameName: string, versionName: string, timestamp: any, players: Player[], cards: ProcessCard[], processObjects: ProcessObject[], freeLines: FreeLine[], decisionLines: DecisionLine[] }>) => void) => {
   const versionsRef = collection(db, 'versions');
   const q = query(versionsRef, orderBy('timestamp', 'desc'));
   
@@ -524,6 +529,8 @@ export const subscribeToGameVersions = (gameId: string, callback: (versions: Arr
       players: doc.data().players || [],
       cards: doc.data().cards || [],
       processObjects: doc.data().processObjects || [],
+      freeLines: doc.data().freeLines || [],
+      decisionLines: doc.data().decisionLines || [],
     }));
     // Filtere nur Versionen für dieses Spiel
     const filteredVersions = allVersions.filter(v => v.gameId === gameId);
@@ -542,25 +549,64 @@ export const loadGameVersion = async (gameId: string, versionId: string) => {
   
   const versionData = versionSnap.data();
   
-  // Replace current game state with version data
+  // Collections
   const playersRef = collection(db, 'games', gameId, 'players');
   const cardsRef = collection(db, 'games', gameId, 'cards');
   const objectsRef = collection(db, 'games', gameId, 'objects');
+  const freeLinesRef = collection(db, 'games', gameId, 'freeLines');
+  const decisionLinesRef = collection(db, 'games', gameId, 'decisionLines');
   
-  // Clear existing data (we'll just overwrite for simplicity)
+  // 1. Delete ALL existing data first
+  const [playersSnap, cardsSnap, objectsSnap, freeLinesSnap, decisionLinesSnap] = await Promise.all([
+    getDocs(playersRef),
+    getDocs(cardsRef),
+    getDocs(objectsRef),
+    getDocs(freeLinesRef),
+    getDocs(decisionLinesRef),
+  ]);
+  
+  // Delete all existing documents
+  const deletePromises: any[] = [];
+  playersSnap.forEach(doc => deletePromises.push(deleteDoc(doc.ref)));
+  cardsSnap.forEach(doc => deletePromises.push(deleteDoc(doc.ref)));
+  objectsSnap.forEach(doc => deletePromises.push(deleteDoc(doc.ref)));
+  freeLinesSnap.forEach(doc => deletePromises.push(deleteDoc(doc.ref)));
+  decisionLinesSnap.forEach(doc => deletePromises.push(deleteDoc(doc.ref)));
+  
+  await Promise.all(deletePromises);
+  
+  // 2. Load new data from version
+  const loadPromises = [];
+  
   // Load players
-  for (const player of versionData.players) {
-    await setDoc(doc(playersRef, player.id), player);
+  for (const player of versionData.players || []) {
+    loadPromises.push(setDoc(doc(playersRef, player.id), player));
   }
   
   // Load cards
-  for (const card of versionData.cards) {
-    await setDoc(doc(cardsRef, card.id), card);
+  for (const card of versionData.cards || []) {
+    loadPromises.push(setDoc(doc(cardsRef, card.id), card));
   }
   
   // Load objects
-  for (const obj of versionData.processObjects) {
-    await setDoc(doc(objectsRef, obj.id), obj);
+  for (const obj of versionData.processObjects || []) {
+    loadPromises.push(setDoc(doc(objectsRef, obj.id), obj));
   }
+  
+  // Load free lines
+  if (versionData.freeLines) {
+    for (const line of versionData.freeLines) {
+      loadPromises.push(setDoc(doc(freeLinesRef, line.id), line));
+    }
+  }
+  
+  // Load decision lines
+  if (versionData.decisionLines) {
+    for (const line of versionData.decisionLines) {
+      loadPromises.push(setDoc(doc(decisionLinesRef, line.id), line));
+    }
+  }
+  
+  await Promise.all(loadPromises);
 };
 
