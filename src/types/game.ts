@@ -40,6 +40,8 @@ export interface ProcessCard {
   timestamp: number;
   fromPlayerId: string;  // Wer übergibt
   toPlayerId: string;    // An wen wird übergeben
+  fromProcessStepId?: string;  // Optional: Von welchem Prozessschritt
+  toProcessStepId?: string;    // Optional: Zu welchem Prozessschritt
   medium?: string;       // Über welches Medium wird übergeben (Text)
   duration?: string;     // Wie lange dauert der Schritt
   description?: string;  // Detaillierte Beschreibung
