@@ -152,6 +152,10 @@ const GameBoard: React.FC<GameBoardProps> = ({
   // State for free line middle drag
   const [freeLineMiddleDragOffset, setFreeLineMiddleDragOffset] = React.useState<{ offsetX: number; offsetY: number } | null>(null);
   
+  // State for tracking if drag actually happened (vs just click)
+  const [dragStartPosition, setDragStartPosition] = React.useState<{ x: number; y: number } | null>(null);
+  const [hasActuallyDragged, setHasActuallyDragged] = React.useState(false);
+  
   // State for snap target highlighting
   const [snapTargetPlayerId, setSnapTargetPlayerId] = React.useState<string | null>(null);
   
@@ -1321,12 +1325,26 @@ const GameBoard: React.FC<GameBoardProps> = ({
       const line = freeLines.find(l => l.id === lineId);
       if (!line) return;
       
+      // Prüfe ob tatsächlich gezogen wurde (mindestens 5 Pixel)
+      if (dragStartPosition && !hasActuallyDragged) {
+        const dragDistance = Math.sqrt(
+          Math.pow(e.clientX - dragStartPosition.x, 2) + 
+          Math.pow(e.clientY - dragStartPosition.y, 2)
+        );
+        if (dragDistance > 5) {
+          setHasActuallyDragged(true);
+        } else {
+          return; // Noch nicht weit genug gezogen
+        }
+      }
+      
       const boardRect = gameBoardRef.current.getBoundingClientRect();
       const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
       const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
       
-      // Beim ersten Move: Offset berechnen
+      // Offset sollte bereits beim MouseDown gesetzt worden sein
       if (!freeLineMiddleDragOffset) {
+        console.warn('⚠️ Offset nicht gesetzt, berechne jetzt');
         const midX = (line.startPosition.x + line.endPosition.x) / 2;
         const midY = (line.startPosition.y + line.endPosition.y) / 2;
         setFreeLineMiddleDragOffset({
@@ -1721,6 +1739,20 @@ const GameBoard: React.FC<GameBoardProps> = ({
     
     // Wenn eine freie Linie gezogen wurde
     if (draggedPlayer && (draggedPlayer.startsWith('freeline-start-') || draggedPlayer.startsWith('freeline-end-') || draggedPlayer.startsWith('freeline-middle-'))) {
+      // Reset drag tracking states
+      setDragStartPosition(null);
+      const actuallyDragged = hasActuallyDragged;
+      setHasActuallyDragged(false);
+      
+      // Wenn nur geklickt (nicht gezogen), ignoriere
+      if (!actuallyDragged) {
+        console.log('⏭️ Nur Klick, kein Drag - ignoriere');
+        setDraggedPlayer(null);
+        setFreeLineMiddleDragOffset(null);
+        setSnapTargetPlayerId(null);
+        return;
+      }
+      
       console.log('✅ Freie Linie erfolgreich positioniert');
       
       const lineId = draggedPlayer.replace('freeline-start-', '').replace('freeline-end-', '').replace('freeline-middle-', '');
@@ -2741,6 +2773,189 @@ const GameBoard: React.FC<GameBoardProps> = ({
                   {lineToNext}
                 </g>
               ) : null;
+            })}
+
+            {/* Draw Free Lines */}
+            {freeLines.map((line) => {
+              // If line is connected to players, render between lanes
+              if (line.startPlayerId && line.endPlayerId) {
+                const startPlayer = activePlayers.find(p => p.id === line.startPlayerId);
+                const endPlayer = activePlayers.find(p => p.id === line.endPlayerId);
+                
+                if (!startPlayer || !endPlayer) return null;
+                
+                const startLaneIndex = activePlayers.indexOf(startPlayer);
+                const endLaneIndex = activePlayers.indexOf(endPlayer);
+                
+                // Start at player bubble in player column - right edge
+                const startX = (leftMargin + playerColumnWidth) / 2 + 65; // Right edge of player bubble
+                const startY = topMargin + startLaneIndex * laneHeight + laneHeight / 2;
+                
+                // End at player bubble - left edge
+                const endX = (leftMargin + playerColumnWidth) / 2 - 65; // Left edge of player bubble
+                const endY = topMargin + endLaneIndex * laneHeight + laneHeight / 2;
+                
+                const strokeDasharray = line.style === 'dashed' ? '10,5' : line.style === 'dotted' ? '2,4' : 'none';
+                
+                // Create nice swimlane path: go right, then vertical, then left
+                const rightOffset = leftMargin + playerColumnWidth + 60; // Go into process area
+                
+                let pathD;
+                if (startLaneIndex === endLaneIndex) {
+                  // Same lane - simple horizontal line
+                  pathD = `M ${startX} ${startY} L ${endX} ${endY}`;
+                } else {
+                  // Different lanes - create stepped path
+                  pathD = `M ${startX} ${startY} L ${rightOffset} ${startY} L ${rightOffset} ${endY} L ${endX} ${endY}`;
+                }
+                
+                return (
+                  <path
+                    key={`freeline-swimlane-${line.id}`}
+                    d={pathD}
+                    stroke={line.color}
+                    strokeWidth={line.thickness || 2}
+                    strokeDasharray={strokeDasharray}
+                    fill="none"
+                    opacity="0.7"
+                    className="pointer-events-auto cursor-pointer hover:opacity-100"
+                    onClick={() => setSelectedFreeLine(line.id)}
+                  />
+                );
+              }
+              return null;
+            })}
+
+            {/* Draw Decision Lines */}
+            {decisionLines.map((line) => {
+              // If line has player connections, render in swimlane
+              if (line.startPlayerId && (line.option1PlayerId || line.option2PlayerId)) {
+                const startPlayer = activePlayers.find(p => p.id === line.startPlayerId);
+                if (!startPlayer) return null;
+                
+                const startLaneIndex = activePlayers.indexOf(startPlayer);
+                
+                // Start at player bubble
+                const startX = (leftMargin + playerColumnWidth) / 2 + 60; // Right edge
+                const startY = topMargin + startLaneIndex * laneHeight + laneHeight / 2;
+                
+                // Decision box position - offset to the right
+                const decisionBoxX = startX + 150;
+                const decisionBoxY = startY;
+                
+                const paths = [];
+                
+                // Line to decision box
+                paths.push(
+                  <line
+                    key={`decisionline-to-box-${line.id}`}
+                    x1={startX}
+                    y1={startY}
+                    x2={decisionBoxX - 25}
+                    y2={decisionBoxY}
+                    stroke={line.color}
+                    strokeWidth="3"
+                    opacity="0.7"
+                  />
+                );
+                
+                // Option 1 line
+                if (line.option1PlayerId) {
+                  const option1Player = activePlayers.find(p => p.id === line.option1PlayerId);
+                  if (option1Player) {
+                    const option1LaneIndex = activePlayers.indexOf(option1Player);
+                    const option1Y = topMargin + option1LaneIndex * laneHeight + laneHeight / 2;
+                    
+                    paths.push(
+                      <g key={`decisionline-option1-${line.id}`}>
+                        <path
+                          d={`M ${decisionBoxX + 25} ${decisionBoxY} L ${decisionBoxX + 80} ${decisionBoxY} L ${decisionBoxX + 80} ${option1Y}`}
+                          stroke={line.color}
+                          strokeWidth="3"
+                          fill="none"
+                          opacity="0.7"
+                          className="pointer-events-auto cursor-pointer hover:opacity-100"
+                          onClick={() => setSelectedDecisionLine(line.id)}
+                        />
+                        <text
+                          x={decisionBoxX + 85}
+                          y={option1Y - 10}
+                          fill="white"
+                          fontSize="12"
+                          fontWeight="bold"
+                          className="pointer-events-none"
+                        >
+                          {line.option1Label || 'Option 1'}
+                        </text>
+                      </g>
+                    );
+                  }
+                }
+                
+                // Option 2 line
+                if (line.option2PlayerId) {
+                  const option2Player = activePlayers.find(p => p.id === line.option2PlayerId);
+                  if (option2Player) {
+                    const option2LaneIndex = activePlayers.indexOf(option2Player);
+                    const option2Y = topMargin + option2LaneIndex * laneHeight + laneHeight / 2;
+                    
+                    paths.push(
+                      <g key={`decisionline-option2-${line.id}`}>
+                        <path
+                          d={`M ${decisionBoxX + 25} ${decisionBoxY} L ${decisionBoxX + 120} ${decisionBoxY} L ${decisionBoxX + 120} ${option2Y}`}
+                          stroke={line.color}
+                          strokeWidth="3"
+                          fill="none"
+                          opacity="0.7"
+                          className="pointer-events-auto cursor-pointer hover:opacity-100"
+                          onClick={() => setSelectedDecisionLine(line.id)}
+                        />
+                        <text
+                          x={decisionBoxX + 125}
+                          y={option2Y - 10}
+                          fill="white"
+                          fontSize="12"
+                          fontWeight="bold"
+                          className="pointer-events-none"
+                        >
+                          {line.option2Label || 'Option 2'}
+                        </text>
+                      </g>
+                    );
+                  }
+                }
+                
+                // Decision box (diamond)
+                paths.push(
+                  <g key={`decisionline-box-${line.id}`}>
+                    <rect
+                      x={decisionBoxX - 25}
+                      y={decisionBoxY - 25}
+                      width="50"
+                      height="50"
+                      fill={line.color}
+                      opacity="0.6"
+                      transform={`rotate(45 ${decisionBoxX} ${decisionBoxY})`}
+                      className="pointer-events-auto cursor-pointer"
+                      onClick={() => setSelectedDecisionLine(line.id)}
+                    />
+                    <text
+                      x={decisionBoxX}
+                      y={decisionBoxY + 5}
+                      fill="white"
+                      fontSize="20"
+                      fontWeight="bold"
+                      textAnchor="middle"
+                      className="pointer-events-none"
+                    >
+                      ?
+                    </text>
+                  </g>
+                );
+                
+                return <g key={`decisionline-swimlane-${line.id}`}>{paths}</g>;
+              }
+              return null;
             })}
 
             {/* Draw decision lines - each option goes to its target */}
@@ -4839,16 +5054,15 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             const step = obj as ProcessStep;
                             const isDragging = draggedProcessStep === step.id;
                             
-                            // Wenn dieser Prozessschritt gerade gedraggt wird, blende ihn hier aus (zeige nur Preview)
-                            if (isDragging) return null;
-                            
                             return (
                             <div
                               key={step.id}
-                              className={`group bg-gradient-to-br from-teal-500 to-teal-600 backdrop-blur rounded-xl p-3 shadow-xl border-2 border-teal-300/50 w-44 transition-all relative cursor-grab active:cursor-grabbing hover:shadow-2xl hover:scale-105`}
+                              className={`group bg-gradient-to-br from-teal-500 to-teal-600 backdrop-blur rounded-xl p-3 shadow-xl border-2 border-teal-300/50 w-44 transition-all relative cursor-grab active:cursor-grabbing hover:shadow-2xl hover:scale-105 ${isDragging ? 'opacity-30' : ''}`}
                               style={{ zIndex: 10 }}
                               onMouseDown={(e) => {
-                                e.stopPropagation();
+                                // NICHT stopPropagation aufrufen, damit MouseMove funktioniert
+                                e.preventDefault();
+                                
                                 // Speichere ursprünglichen Zustand
                                 setDraggedProcessStepOriginalState({
                                   inWaitingArea: step.inWaitingArea || false,
@@ -4941,6 +5155,8 @@ const GameBoard: React.FC<GameBoardProps> = ({
                       transform: 'translate(-50%, -50%)',
                       pointerEvents: 'auto',
                       zIndex: isDragging ? 50 : 30,
+                      opacity: isDragging ? 0.3 : 1,
+                      transition: 'opacity 0.2s',
                     }}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
@@ -4963,7 +5179,6 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             assignedToPlayerId: step.assignedToPlayerId
                           });
                           setDraggedProcessStep(step.id);
-                          setDragPreviewPosition({ x: step.position!.x, y: step.position!.y });
                         }}
                       >
                         {/* Äußerer Ring */}
@@ -5382,6 +5597,22 @@ const GameBoard: React.FC<GameBoardProps> = ({
                     onMouseDown={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
+                      
+                      // Speichere Start-Position für Drag-Detection
+                      setDragStartPosition({ x: e.clientX, y: e.clientY });
+                      setHasActuallyDragged(false);
+                      
+                      // Berechne Offset sofort beim MouseDown
+                      if (gameBoardRef.current) {
+                        const boardRect = gameBoardRef.current.getBoundingClientRect();
+                        const mouseX = ((e.clientX - boardRect.left) / boardRect.width) * 100;
+                        const mouseY = ((e.clientY - boardRect.top) / boardRect.height) * 100;
+                        setFreeLineMiddleDragOffset({
+                          offsetX: mouseX - midX,
+                          offsetY: mouseY - midY
+                        });
+                      }
+                      
                       setDraggedPlayer(`freeline-middle-${line.id}`);
                     }}
                   >
@@ -6961,7 +7192,9 @@ const GameBoard: React.FC<GameBoardProps> = ({
                             <div
                               key={step.id}
                               className={`flex-shrink-0 bg-gradient-to-br from-teal-600/80 to-teal-800/80 rounded-xl p-3 border-2 border-teal-400/30 hover:border-teal-400/50 transition-all hover:scale-105 cursor-grab active:cursor-grabbing min-w-[140px] hover:shadow-xl ${isDragging ? 'opacity-30 scale-95' : ''}`}
-                              onMouseDown={(e) => handleProcessStepMouseDown(e, step.id)}
+                              onMouseDown={(e) => {
+                                handleProcessStepMouseDown(e, step.id);
+                              }}
                             >
                               <div className="text-white">
                                 <div className="text-sm font-bold mb-2 line-clamp-2 leading-tight">{step.name}</div>

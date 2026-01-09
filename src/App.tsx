@@ -257,16 +257,18 @@ const App: React.FC = () => {
     toPlayerId: string,
     medium?: string,
     duration?: string,
-    description?: string
+    description?: string,
+    fromProcessStepId?: string,
+    toProcessStepId?: string
   ) => {
-    console.log('🔥 App.tsx: addCard called', { text, fromPlayerId, toPlayerId, medium, gameId });
+    console.log('🔥 App.tsx: addCard called', { text, fromPlayerId, toPlayerId, fromProcessStepId, toProcessStepId, medium, gameId });
     
     if (!gameId) {
       console.error('❌ App.tsx: No gameId!');
       return;
     }
     
-    // fromPlayer kann leer sein bei freien Verbindungen
+    // fromPlayer kann leer sein bei freien Verbindungen oder ProcessStep-Verbindungen
     const fromPlayer = fromPlayerId ? players.find(p => p.id === fromPlayerId) : null;
     
     const newCard: ProcessCard = {
@@ -279,6 +281,8 @@ const App: React.FC = () => {
       timestamp: Date.now(),
       fromPlayerId,
       toPlayerId,
+      fromProcessStepId,
+      toProcessStepId,
       medium: medium || undefined,
       duration: duration || undefined,
       description: description || undefined,
