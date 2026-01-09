@@ -159,7 +159,7 @@ const GameBoard: React.FC<GameBoardProps> = ({
   // State for snap target highlighting
   const [snapTargetPlayerId, setSnapTargetPlayerId] = React.useState<string | null>(null);
   
-  // State for expanding/collapsing the bottom panel
+  // State for expanding/collapsing the bottom paneljj
   const [isBottomPanelExpanded, setIsBottomPanelExpanded] = React.useState(true);
   
   // State for object-based process creation
