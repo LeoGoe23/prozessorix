@@ -32,6 +32,14 @@ const TextSharingPage: React.FC = () => {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    try {
+      await gameService.deleteSharedText(id);
+    } catch (error) {
+      console.error('Error deleting text:', error);
+    }
+  };
+
   const handleCopy = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);

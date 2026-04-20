@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import LandingPage from './landing/LandingPage';
 import GameBoard from './components/GameBoard';
 import PlayerView from './components/PlayerView';
@@ -22,7 +22,6 @@ const App: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string>('');
   const [userPassword, setUserPassword] = useState<string>('');
   const [userCompany, setUserCompany] = useState<string>('');
-  const [userProcess, setUserProcess] = useState<string>('');
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
 
   // Initialize: Check URL - Landing Page or Game
@@ -475,7 +474,7 @@ const App: React.FC = () => {
                 onAddDecisionLine={addDecisionLine}
                 onUpdateDecisionLine={updateDecisionLine}
                 onRemoveDecisionLine={removeDecisionLine}
-                gameId={gameId}
+                gameId={gameId || undefined}
                 userName={userName}
                 onShowLogin={() => setShowLoginModal(true)}
               />
