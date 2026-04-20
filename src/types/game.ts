@@ -143,6 +143,13 @@ export type ProcessObject = ProcessStep | SystemTool | CommunicationMethod | Pro
 
 export type GameBoardView = 'player-centric' | 'swimlane';
 
+export interface SharedText {
+  id: string;
+  content: string;
+  createdAt: Date;
+  author?: string; // Optional author name
+}
+
 export interface GameState {
   players: Player[];
   cards: ProcessCard[];

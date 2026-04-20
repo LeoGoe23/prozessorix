@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import LandingPage from './landing/LandingPage';
 import GameBoard from './components/GameBoard';
 import PlayerView from './components/PlayerView';
+import TextSharingPage from './components/TextSharingPage';
 import { Player, ProcessCard, ProcessObject, FreeLine, DecisionLine } from './types/game';
 import * as gameService from './firebase/gameService';
 
 const App: React.FC = () => {
+  const location = useLocation();
   const [showLanding, setShowLanding] = useState<boolean>(true);
   const [gameId, setGameId] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -354,6 +357,11 @@ const App: React.FC = () => {
   };
 
   // Show landing page if no game parameter
+  // If on /test route, show text sharing page
+  if (location.pathname === '/test') {
+    return <TextSharingPage />;
+  }
+
   if (showLanding) {
     if (isInitializing) {
       return (
@@ -412,183 +420,167 @@ const App: React.FC = () => {
     );
   }
 
-  // Show loading while initializing game
-  if (isInitializing || !gameId) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
-            <div className="text-3xl">🔥</div>
-          </div>
-          <div className="text-xl font-bold text-white">Processorix wird gestartet...</div>
-        </div>
-      </div>
-    );
-  }
-
-  // Show appropriate view based on mode
-  if (viewMode === 'player') {
-    // Player View - Mobile optimized, simplified
-    return (
-      <PlayerView
-        players={players}
-        cards={cards}
-        onAddPlayer={addPlayer}
-        onAddCard={addCard}
-        onSwitchToMasterView={() => setViewMode('master')}
-      />
-    );
-  }
-
-  // Master View - Full desktop view
   return (
-    <div className="relative h-screen">
-      <GameBoard
-        players={players}
-        cards={cards}
-        processObjects={processObjects}
-        freeLines={freeLines}
-        decisionLines={decisionLines}
-        currentPlayerIndex={0}
-        currentRound={1}
-        maxRounds={999}
-        onAddCard={addCard}
-        onUpdateCard={updateCard}
-        onRemoveCard={removeCard}
-        onEndTurn={() => {}}
-        onRestart={() => setGameId(null)}
-        isGameFinished={false}
-        isGameStarted={true}
-        onAddPlayer={addPlayer}
-        onRemovePlayer={removePlayer}
-        onUpdatePlayerPosition={updatePlayerPosition}
-        onAddProcessObject={addProcessObject}
-        onRemoveProcessObject={removeProcessObject}
-        onUpdateProcessObject={updateProcessObject}
-        onAddFreeLine={addFreeLine}
-        onUpdateFreeLine={updateFreeLine}
-        onRemoveFreeLine={removeFreeLine}
-        onAddDecisionLine={addDecisionLine}
-        onUpdateDecisionLine={updateDecisionLine}
-        onRemoveDecisionLine={removeDecisionLine}
-        gameId={gameId}
-        userName={userName}
-        onShowLogin={() => setShowLoginModal(true)}
-      />
-      
-      {/* Login Modal */}
-      {showLoginModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200]">
-          <div className="bg-slate-800 rounded-2xl shadow-2xl border border-white/20 p-8 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold text-white mb-4">Anmelden</h2>
-            <p className="text-gray-400 mb-6">Gib deine Daten ein, um fortzufahren</p>
-            
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
-                <input
-                  type="text"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                  placeholder="Dein Name"
-                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
-                      setShowLoginModal(false);
-                    }
-                  }}
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">E-Mail</label>
-                <input
-                  type="email"
-                  value={userEmail}
-                  onChange={(e) => setUserEmail(e.target.value)}
-                  placeholder="deine@email.de"
-                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
-                      setShowLoginModal(false);
-                    }
-                  }}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Firma</label>
-                <input
-                  type="text"
-                  value={userCompany}
-                  onChange={(e) => setUserCompany(e.target.value)}
-                  placeholder="Dein Name"
-                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
-                      setShowLoginModal(false);
-                    }
-                  }}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Prozess</label>
-                <input
-                  type="text"
-                  value={userProcess}
-                  onChange={(e) => setUserProcess(e.target.value)}
-                  placeholder="deine@email.de"
-                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
-                      setShowLoginModal(false);
-                    }
-                  }}
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Passwort</label>
-                <input
-                  type="password"
-                  value={userPassword}
-                  onChange={(e) => setUserPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
-                      setShowLoginModal(false);
-                    }
-                  }}
-                />
-              </div>
+    <>
+      {/* Show loading while initializing game */}
+      {isInitializing ? (
+        <div className="h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+              <div className="text-3xl">🔥</div>
             </div>
-            
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-all"
-              >
-                Abbrechen
-              </button>
-              <button
-                onClick={() => {
-                  if (userName.trim() && userEmail.trim() && userPassword.trim()) {
-                    setShowLoginModal(false);
-                  }
-                }}
-                disabled={!userName.trim() || !userEmail.trim() || !userPassword.trim()}
-                className="flex-1 px-4 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold"
-              >
-                Anmelden
-              </button>
-            </div>
+            <div className="text-xl font-bold text-white">Processorix wird gestartet...</div>
           </div>
         </div>
+      ) : showLanding ? (
+        <LandingPage />
+      ) : (
+        <>
+          {/* Game content */}
+          {viewMode === 'player' ? (
+            <PlayerView
+              players={players}
+              cards={cards}
+              onAddPlayer={addPlayer}
+              onAddCard={addCard}
+              onSwitchToMasterView={() => setViewMode('master')}
+            />
+          ) : (
+            <div className="relative h-screen">
+              <GameBoard
+                players={players}
+                cards={cards}
+                processObjects={processObjects}
+                freeLines={freeLines}
+                decisionLines={decisionLines}
+                currentPlayerIndex={0}
+                currentRound={1}
+                maxRounds={999}
+                onAddCard={addCard}
+                onUpdateCard={updateCard}
+                onRemoveCard={removeCard}
+                onEndTurn={() => {}}
+                onRestart={() => setGameId(null)}
+                isGameFinished={false}
+                isGameStarted={true}
+                onAddPlayer={addPlayer}
+                onRemovePlayer={removePlayer}
+                onUpdatePlayerPosition={updatePlayerPosition}
+                onAddProcessObject={addProcessObject}
+                onRemoveProcessObject={removeProcessObject}
+                onUpdateProcessObject={updateProcessObject}
+                onAddFreeLine={addFreeLine}
+                onUpdateFreeLine={updateFreeLine}
+                onRemoveFreeLine={removeFreeLine}
+                onAddDecisionLine={addDecisionLine}
+                onUpdateDecisionLine={updateDecisionLine}
+                onRemoveDecisionLine={removeDecisionLine}
+                gameId={gameId}
+                userName={userName}
+                onShowLogin={() => setShowLoginModal(true)}
+              />
+              
+              {/* Login Modal */}
+              {showLoginModal && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[200]">
+                  <div className="bg-slate-800 rounded-2xl shadow-2xl border border-white/20 p-8 max-w-md w-full mx-4">
+                    <h2 className="text-2xl font-bold text-white mb-4">Anmelden</h2>
+                    <p className="text-gray-400 mb-6">Gib deine Daten ein, um fortzufahren</p>
+                    
+                    <div className="space-y-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
+                        <input
+                          type="text"
+                          value={userName}
+                          onChange={(e) => setUserName(e.target.value)}
+                          placeholder="Dein Name"
+                          className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                              setShowLoginModal(false);
+                            }
+                          }}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">E-Mail</label>
+                        <input
+                          type="email"
+                          value={userEmail}
+                          onChange={(e) => setUserEmail(e.target.value)}
+                          placeholder="deine@email.de"
+                          className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                              setShowLoginModal(false);
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">Firma</label>
+                        <input
+                          type="text"
+                          value={userCompany}
+                          onChange={(e) => setUserCompany(e.target.value)}
+                          placeholder="Dein Name"
+                          className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                              setShowLoginModal(false);
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">Passwort</label>
+                        <input
+                          type="password"
+                          value={userPassword}
+                          onChange={(e) => setUserPassword(e.target.value)}
+                          placeholder="Dein Passwort"
+                          className="w-full px-4 py-3 bg-slate-700 text-white rounded-xl border border-white/10 focus:border-indigo-400 focus:outline-none"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && userName.trim() && userEmail.trim() && userPassword.trim()) {
+                              setShowLoginModal(false);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setShowLoginModal(false)}
+                        className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-all"
+                      >
+                        Abbrechen
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (userName.trim() && userEmail.trim() && userPassword.trim()) {
+                            setShowLoginModal(false);
+                          }
+                        }}
+                        disabled={!userName.trim() || !userEmail.trim() || !userPassword.trim()}
+                        className="flex-1 px-4 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold"
+                      >
+                        Anmelden
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
-    </div>
+    </>
   );
 };
 

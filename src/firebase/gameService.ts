@@ -610,3 +610,61 @@ export const loadGameVersion = async (gameId: string, versionId: string) => {
   await Promise.all(loadPromises);
 };
 
+// Shared Text functions
+import { SharedText } from '../types/game';
+
+// Save a shared text
+export const saveSharedText = async (content: string, author?: string) => {
+  const textsRef = collection(db, 'sharedTexts');
+  const docRef = await addDoc(textsRef, {
+    content,
+    author,
+    createdAt: serverTimestamp(),
+  });
+  return docRef.id;
+};
+
+// Get all shared texts
+export const getSharedTexts = async (): Promise<SharedText[]> => {
+  const textsRef = collection(db, 'sharedTexts');
+  const q = query(textsRef, orderBy('createdAt', 'desc'));
+  const snapshot = await getDocs(q);
+  const texts: SharedText[] = [];
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    texts.push({
+      id: doc.id,
+      content: data.content,
+      createdAt: data.createdAt?.toDate() || new Date(),
+      author: data.author,
+    });
+  });
+  return texts;
+};
+
+// Delete a shared text
+export const deleteSharedText = async (textId: string) => {
+  const textRef = doc(db, 'sharedTexts', textId);
+  await deleteDoc(textRef);
+};
+
+// Subscribe to shared texts (real-time)
+export const subscribeToSharedTexts = (callback: (texts: SharedText[]) => void) => {
+  const textsRef = collection(db, 'sharedTexts');
+  const q = query(textsRef, orderBy('createdAt', 'desc'));
+  
+  return onSnapshot(q, (snapshot) => {
+    const texts: SharedText[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      texts.push({
+        id: doc.id,
+        content: data.content,
+        createdAt: data.createdAt?.toDate() || new Date(),
+        author: data.author,
+      });
+    });
+    callback(texts);
+  });
+};
+
