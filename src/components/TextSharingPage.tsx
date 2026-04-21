@@ -16,15 +16,32 @@ const TextSharingPage: React.FC = () => {
     return unsubscribe;
   }, []);
 
-  const handleSave = async () => {
-    if (!newText.trim()) return;
+  const [error, setError] = useState<string | null>(null);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
 
+  const log = (msg: string) => {
+    console.log('[TextSharing]', msg);
+    setDebugLog(prev => [...prev, `${new Date().toLocaleTimeString()}: ${msg}`]);
+  };
+
+  const handleSave = async () => {
+    setError(null);
+    if (!newText.trim()) {
+      log('Abbruch: Text leer');
+      return;
+    }
+
+    log(`Speichere Text: "${newText.trim().substring(0, 30)}..."`);
     setLoading(true);
     try {
-      await gameService.saveSharedText(newText.trim());
+      const id = await gameService.saveSharedText(newText.trim());
+      log(`Gespeichert mit ID: ${id}`);
       setNewText('');
-    } catch (error) {
-      console.error('Error saving text:', error);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      log(`FEHLER: ${msg}`);
+      setError(msg);
+      console.error('Error saving text:', err);
     } finally {
       setLoading(false);
     }
@@ -77,6 +94,16 @@ const TextSharingPage: React.FC = () => {
             >
               {loading ? 'Speichere...' : 'Speichern'}
             </button>
+            {error && (
+              <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded text-sm">
+                <strong>Fehler:</strong> {error}
+              </div>
+            )}
+            {debugLog.length > 0 && (
+              <div className="p-3 bg-gray-800 text-green-400 rounded text-xs font-mono max-h-32 overflow-y-auto">
+                {debugLog.map((line, i) => <div key={i}>{line}</div>)}
+              </div>
+            )}
           </div>
         </div>
 
