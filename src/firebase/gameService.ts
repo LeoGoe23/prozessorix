@@ -616,11 +616,12 @@ import { SharedText } from '../types/game';
 // Save a shared text
 export const saveSharedText = async (content: string, author?: string) => {
   const textsRef = collection(db, 'sharedTexts');
-  const docRef = await addDoc(textsRef, {
+  const data: any = {
     content,
-    author,
     createdAt: serverTimestamp(),
-  });
+  };
+  if (author) data.author = author;
+  const docRef = await addDoc(textsRef, data);
   return docRef.id;
 };
 
