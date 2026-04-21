@@ -5,7 +5,6 @@ import * as gameService from '../firebase/gameService';
 const TextSharingPage: React.FC = () => {
   const [texts, setTexts] = useState<SharedText[]>([]);
   const [newText, setNewText] = useState('');
-  const [author, setAuthor] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -22,9 +21,8 @@ const TextSharingPage: React.FC = () => {
 
     setLoading(true);
     try {
-      await gameService.saveSharedText(newText.trim(), author.trim() || undefined);
+      await gameService.saveSharedText(newText.trim());
       setNewText('');
-      setAuthor('');
     } catch (error) {
       console.error('Error saving text:', error);
     } finally {
